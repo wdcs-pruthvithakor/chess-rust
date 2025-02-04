@@ -1,14 +1,21 @@
 use iced::{
-    border::Radius, widget::{button, image, Row, Column, Text, Container, Button},Theme, Background, Border, Color as IcedColor, Element, Length, Shadow
+    border::Radius, widget::{button, image, slider, Row, Column, Text, Container, Button},Theme, Task, Background, Border, Color as IcedColor, Element, Length, Shadow
 };
 use iced::widget::Image;
 mod engine;
 use engine::{Board, Color, PieceType, best_move_for_color, opposite_color};
 
+enum AppState {
+    SelectingDifficulty,
+    Playing,
+}
+
 #[derive(Debug, Clone)]
 enum Message {
     SquareClicked(usize, usize),
     BotMove,
+    DifficultySelected,
+    SliderChanged(f32),
 }
 
 // #[derive(Debug)]
@@ -20,6 +27,8 @@ struct ChessApp {
     current_turn: Color,
     // Difficulty (minimax depth) for the bot.
     difficulty: u32,
+    slider_value: f32,
+    state: AppState, // Add a state tracker
 }
 
 impl Default for ChessApp {
@@ -29,6 +38,8 @@ impl Default for ChessApp {
             selected: None,
             current_turn: Color::White,
             difficulty: 3, // Adjust for desired bot strength.
+            slider_value: 3.0,
+            state: AppState::SelectingDifficulty, // Start with difficulty selection
         }
     }
 }
@@ -36,8 +47,15 @@ impl Default for ChessApp {
 /// Update function for the application.
 /// It receives a mutable reference to our state and a message,
 /// and returns a Command that can trigger asynchronous actions.
-fn update(app: &mut ChessApp, message: Message)  {
+fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
     match message {
+        Message::SliderChanged(value) => {
+            app.slider_value = value;
+        }
+        Message::DifficultySelected => {
+            app.difficulty = app.slider_value.round() as u32; // Save slider value as difficulty
+            app.state = AppState::Playing;
+        }
         Message::SquareClicked(row, col) => {
             // Allow human moves only when it's White's turn.
             println!("turn: {:?}", app.current_turn);
@@ -54,7 +72,7 @@ fn update(app: &mut ChessApp, message: Message)  {
                         app.selected = None;
                         app.current_turn = opposite_color(app.current_turn);
                         // After the human move, trigger the bot move asynchronously.
-                        update(app, Message::BotMove);
+                        return Task::perform(async { () }, |_| Message::BotMove);
                     } else {
                         // Clear selection on an invalid move.
                         app.selected = None;
@@ -82,11 +100,28 @@ fn update(app: &mut ChessApp, message: Message)  {
 
         }
     }
+    Task::none()
 }
 
 /// View function for the application.
 /// It receives an immutable reference to our state and returns an Element.
 fn view(app: &ChessApp) -> Element<Message> {
+    if matches!(app.state, AppState::SelectingDifficulty) {
+        return Column::new()
+            .push(Text::new("Select Difficulty"))
+            .push(
+                slider(2.0..=9.0, app.slider_value, Message::SliderChanged)
+                    .step(1.0) // Step makes it snap to whole numbers
+            )
+            .push(Text::new(format!("Difficulty: {}", app.slider_value.round() as u32)))
+            .push(
+                Button::new(Text::new("Start Game"))
+                    .on_press(Message::DifficultySelected)
+            )
+            .padding(20)
+            .spacing(10)
+            .into();
+    }
     let mut board_view = Column::new().spacing(0);
 
     for r in 0..8 {
