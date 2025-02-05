@@ -157,6 +157,17 @@ fn view(app: &ChessApp) -> Element<Message> {
                     let is_light = (r + c) % 2 == 0;
                     let square_color = if is_light { "#F0D9B5" } else { "#B58863" };
 
+                    // Highlight selected square
+                    let highlight_color = if let Some((sel_row, sel_col)) = app.selected {
+                        if r == sel_row && c == sel_col {
+                            "#FFDD00" // A bright yellow for the selected square
+                        } else {
+                            square_color // Default square color
+                        }
+                    } else {
+                        square_color // Default square color if nothing is selected
+                    };
+
                     let square_content: Element<'static, Message> = app.board.squares[r][c].and_then(|piece| {
                         let asset: &str = match (piece.color, piece.kind) {
                             (Color::White, PieceType::Pawn) => "assets/white_pawn.jpeg",
@@ -184,7 +195,7 @@ fn view(app: &ChessApp) -> Element<Message> {
                     });
 
                     let square = Button::new(square_content) // Use Button directly with container
-                        .style(|_theme: &Theme, _style| BoardSquareStyle { color: square_color }.style()) // Style the Button
+                        .style(|_theme: &Theme, _style| BoardSquareStyle { color: highlight_color }.style()) // Style the Button
                         .on_press(Message::SquareClicked(r, c))
                         .width(Length::FillPortion(1))
                         .height(Length::FillPortion(1));
