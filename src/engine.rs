@@ -653,21 +653,29 @@ fn evaluate_board(board: &Board) -> i32 {
     score
 }
 
-fn minimax(board: &Board, depth: u32, maximizing: bool, color: Color) -> i32 {
-    if depth == 0 {
-        return evaluate_board(board);
+fn minimax(
+    board: &Board,
+    depth: u32,
+    is_maximizing_player: bool,
+    color: Color,
+    mut alpha: i32,
+    mut beta: i32,
+) -> i32 {
+    if depth == 0 || board.is_checkmate(Color::White) || board.is_checkmate(Color::Black) {
+        return evaluate_board(board); // Assume `evaluate` returns an integer score
     }
+
     let moves = board.generate_all_moves(color);
-    if moves.is_empty() {
-        return evaluate_board(board);
-    }
-    if maximizing {
+    
+    if is_maximizing_player {
         let mut max_eval = i32::MIN;
         for m in moves {
             let mut new_board = board.clone();
             new_board.apply_move(m);
-            let eval = minimax(&new_board, depth - 1, false, opposite_color(color));
+            let eval = minimax(&new_board, depth - 1, false, opposite_color(color), alpha, beta);
             max_eval = max_eval.max(eval);
+            alpha = alpha.max(eval);
+            if alpha >= beta { break; } // Pruning
         }
         max_eval
     } else {
@@ -675,8 +683,10 @@ fn minimax(board: &Board, depth: u32, maximizing: bool, color: Color) -> i32 {
         for m in moves {
             let mut new_board = board.clone();
             new_board.apply_move(m);
-            let eval = minimax(&new_board, depth - 1, true, opposite_color(color));
+            let eval = minimax(&new_board, depth - 1, true, opposite_color(color), alpha, beta);
             min_eval = min_eval.min(eval);
+            beta = beta.min(eval);
+            if alpha >= beta { break; } // Pruning
         }
         min_eval
     }
@@ -689,26 +699,39 @@ pub fn best_move_for_color(
 ) -> Option<((usize, usize), (usize, usize))> {
     let moves = board.generate_all_moves(color);
     let mut best_move = None;
-    let mut best_eval = if color == Color::White {
-        i32::MIN
-    } else {
-        i32::MAX
-    };
+    let mut alpha = i32::MIN;
+    let mut beta = i32::MAX;
+    let mut best_eval = if color == Color::White { i32::MIN } else { i32::MAX };
 
     for m in moves {
         let mut new_board = board.clone();
         new_board.apply_move(m);
+
         let eval = minimax(
             &new_board,
             depth - 1,
-            color == Color::Black,
+            color == Color::Black, // is_maximizing_player
             opposite_color(color),
+            alpha,
+            beta,
         );
-        if (color == Color::White && eval > best_eval)
-            || (color == Color::Black && eval < best_eval)
-        {
-            best_eval = eval;
-            best_move = Some(m);
+
+        if color == Color::White {
+            if eval > best_eval {
+                best_eval = eval;
+                best_move = Some(m);
+            }
+            alpha = alpha.max(best_eval); // Update alpha
+        } else {
+            if eval < best_eval {
+                best_eval = eval;
+                best_move = Some(m);
+            }
+            beta = beta.min(best_eval); // Update beta
+        }
+
+        if alpha >= beta {
+            break; // Alpha-beta pruning
         }
     }
     best_move
