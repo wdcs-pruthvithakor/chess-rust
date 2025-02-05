@@ -5,9 +5,17 @@ use iced::widget::Image;
 mod engine;
 use engine::{Board, Color, PieceType, best_move_for_color, opposite_color};
 
+#[derive(Debug, Clone, Copy)]
+enum GameResult {
+    Winner(Color),
+    Draw
+}
+
+#[derive(Debug, Clone)]
 enum AppState {
     SelectingDifficulty,
     Playing,
+    GameOver(GameResult),
 }
 
 #[derive(Debug, Clone)]
@@ -16,6 +24,7 @@ enum Message {
     BotMove,
     DifficultySelected,
     SliderChanged(f32),
+    EndGame(GameResult),
 }
 
 // #[derive(Debug)]
@@ -64,13 +73,16 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                 if let Some((sel_row, sel_col)) = app.selected {
                     println!("selected: {} {}", sel_row, sel_col);
                     // Attempt to move from the selected square to the clicked square.
-                    let potential_moves = app.board.generate_moves_for_piece(sel_row, sel_col);
-                    let valid_move = potential_moves.into_iter()
-                        .find(|&m| m == ((sel_row, sel_col), (row, col)));
-                    if let Some(mv) = valid_move {
-                        app.board.apply_move(mv);
+                    if app.board.is_valid_move((sel_row, sel_col), (row, col)) {
+                        app.board.apply_move(((sel_row, sel_col), (row, col)));
                         app.selected = None;
                         app.current_turn = opposite_color(app.current_turn);
+                        if app.board.is_checkmate(app.current_turn){
+                            let winner = GameResult::Winner(opposite_color(app.current_turn));
+                            return Task::perform(async { () }, move |_| Message::EndGame(winner));
+                        } else if app.board.is_draw(app.current_turn) {
+                            return Task::perform(async { () },  |_| Message::EndGame(GameResult::Draw));
+                        }
                         // After the human move, trigger the bot move asynchronously.
                         return Task::perform(async { () }, |_| Message::BotMove);
                     } else {
@@ -95,9 +107,18 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                 if let Some(mv) = best_move_for_color(&app.board, Color::Black, app.difficulty) {
                     app.board.apply_move(mv);
                     app.current_turn = opposite_color(app.current_turn);
+                    if app.board.is_checkmate(app.current_turn){
+                        let winner = GameResult::Winner(opposite_color(app.current_turn));
+                        return Task::perform(async { () }, move |_| Message::EndGame(winner));
+                    } else if app.board.is_draw(app.current_turn) {
+                        return Task::perform(async { () },  |_| Message::EndGame(GameResult::Draw));
+                    }
                 }
             }
 
+        }
+        Message::EndGame(result) => {
+            app.state = AppState::GameOver(result);
         }
     }
     Task::none()
@@ -106,27 +127,29 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
 /// View function for the application.
 /// It receives an immutable reference to our state and returns an Element.
 fn view(app: &ChessApp) -> Element<Message> {
-    if matches!(app.state, AppState::SelectingDifficulty) {
-        return Column::new()
-            .push(Text::new("Select Difficulty"))
-            .push(
-                slider(2.0..=9.0, app.slider_value, Message::SliderChanged)
-                    .step(1.0) // Step makes it snap to whole numbers
-            )
-            .push(Text::new(format!("Difficulty: {}", app.slider_value.round() as u32)))
-            .push(
-                Button::new(Text::new("Start Game"))
-                    .on_press(Message::DifficultySelected)
-            )
-            .padding(20)
-            .spacing(10)
-            .into();
-    }
-    let mut board_view = Column::new().spacing(0);
+     match &app.state {
+        AppState::SelectingDifficulty => {
+            Column::new()
+                .push(Text::new("Select Difficulty"))
+                .push(
+                    slider(2.0..=9.0, app.slider_value, Message::SliderChanged)
+                        .step(1.0) // Step makes it snap to whole numbers
+                )
+                .push(Text::new(format!("Difficulty: {}", app.slider_value.round() as u32)))
+                .push(
+                    Button::new(Text::new("Start Game"))
+                        .on_press(Message::DifficultySelected)
+                )
+                .padding(20)
+                .spacing(10)
+                .into()
+        }
+        AppState::Playing => {
+            let mut board_view = Column::new().spacing(0);
 
-    for r in 0..8 {
-        let mut row_view = Row::new().spacing(0);
-        for c in 0..8 {
+            for r in 0..8 {
+                let mut row_view = Row::new().spacing(0);
+                for c in 0..8 {
                     let is_light = (r + c) % 2 == 0;
                     let square_color = if is_light { "#F0D9B5" } else { "#B58863" };
 
@@ -168,8 +191,27 @@ fn view(app: &ChessApp) -> Element<Message> {
                 }
             
                 board_view.into() // Convert the final Column to an Element
-}
 
+        }
+        AppState::GameOver(result) => {
+            let result_text = match result {
+                GameResult::Winner(color) => format!("{:?} Wins!", color),
+                GameResult::Draw => "It's a Draw!".to_string(),
+            };
+
+            Column::new()
+                .push(Text::new("Game Over"))
+                .push(Text::new(result_text))
+                .push(
+                    Button::new(Text::new("Play Again"))
+                        .on_press(Message::DifficultySelected) // Restart game
+                )
+                .padding(20)
+                .spacing(10)
+                .into()
+        }
+    }
+}
 
 /// Helper struct for styling a board square.
 struct BoardSquareStyle {
