@@ -301,9 +301,125 @@ impl Board {
 
     pub fn apply_move(&mut self, m: ((usize, usize), (usize, usize))) {
         let ((from_row, from_col), (to_row, to_col)) = m;
-        self.squares[to_row][to_col] = self.squares[from_row][from_col];
-        self.squares[from_row][from_col] = EMPTY;
+        if let Some(mut piece) = self.squares[from_row][from_col] {
+            self.squares[from_row][from_col] = EMPTY;
+            if piece.kind == PieceType::Pawn && (to_row == 0 || to_row == 7) {
+                // Promote to a Queen (can be extended for other choices)
+                piece.kind = PieceType::Queen;
+            }
+            self.squares[to_row][to_col] = Some(piece);
+        }
+    }    
+
+    fn can_castle(&self, color: Color, kingside: bool) -> bool {
+        let row = if color == Color::White { 0 } else { 7 };
+        let (king_col, rook_col) = if kingside { (4, 7) } else { (4, 0) };
+    
+        if let Some(Piece { kind: PieceType::King, color: king_color }) = self.squares[row][king_col] {
+            if let Some(Piece { kind: PieceType::Rook, color: rook_color }) = self.squares[row][rook_col] {
+                if king_color == color && rook_color == color{
+                    // Check for empty squares between them
+                    let mut range = if kingside { 5..7 } else { 1..4 };
+                    if range.all(|c| self.squares[row][c].is_none()) {
+                        return true; // Add additional check for passing through check
+                    }
+                }
+            }
+
+        }
+        false
     }
+
+    fn is_checkmate(&self, color: Color) -> bool {
+        if !self.is_in_check(color) {
+            return false;
+        }
+        let moves = self.generate_all_moves(color);
+        moves.is_empty()
+    }
+    
+    fn is_stalemate(&self, color: Color) -> bool {
+        if self.is_in_check(color) {
+            return false;
+        }
+        let moves = self.generate_all_moves(color);
+        moves.is_empty()
+    }
+
+    pub fn is_in_check(&self, color: Color) -> bool {
+        // Find the king's position
+        let mut king_position: Option<(usize, usize)> = None;
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = self.squares[row][col] {
+                    if piece.color == color && piece.kind == PieceType::King {
+                        king_position = Some((row, col));
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If king is not found (should never happen in a valid game), return false
+        let (king_row, king_col) = match king_position {
+            Some(pos) => pos,
+            None => return false,
+        };
+
+        // Check if any opponent piece can attack the king's position
+        let opponent_color = opposite_color(color);
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = self.squares[row][col] {
+                    if piece.color == opponent_color {
+                        let possible_moves = self.generate_moves_for_piece(row, col);
+                        if possible_moves.iter().any(|&(_, to)| to == (king_row, king_col)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub fn is_valid_move(&self, from: (usize, usize), to: (usize, usize)) -> bool {
+        // Ensure move is within board bounds
+        if from == to || from.0 >= 8 || from.1 >= 8 || to.0 >= 8 || to.1 >= 8 {
+            return false;
+        }
+
+        // Check if there is a piece at the starting position
+        let piece = match self.squares[from.0][from.1] {
+            Some(p) => p,
+            None => return false,
+        };
+
+        // Ensure the piece is not capturing its own color
+        if let Some(target_piece) = self.squares[to.0][to.1] {
+            if target_piece.color == piece.color {
+                return false;
+            }
+        }
+
+        // Check if the move is in the piece’s legal moves
+        let legal_moves = self.generate_moves_for_piece(from.0, from.1);
+        if !legal_moves.contains(&(from, to)) {
+            return false;
+        }
+
+        // Simulate the move to check if it leaves the king in check
+        let mut simulated_board = self.clone();
+        simulated_board.squares[to.0][to.1] = simulated_board.squares[from.0][from.1];
+        simulated_board.squares[from.0][from.1] = None;
+
+        if simulated_board.is_in_check(piece.color) {
+            return false; // Move is invalid if it leaves the king in check
+        }
+
+        true
+    }
+    
 }
 
 fn evaluate_board(board: &Board) -> i32 {
