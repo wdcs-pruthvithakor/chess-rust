@@ -25,6 +25,7 @@ enum Message {
     DifficultySelected,
     SliderChanged(f32),
     EndGame(GameResult),
+    Restart
 }
 
 // #[derive(Debug)]
@@ -60,6 +61,9 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
     match message {
         Message::SliderChanged(value) => {
             app.slider_value = value;
+        }
+        Message::Restart => {
+            *app = ChessApp::default();
         }
         Message::DifficultySelected => {
             app.difficulty = app.slider_value.round() as u32; // Save slider value as difficulty
@@ -204,7 +208,7 @@ fn view(app: &ChessApp) -> Element<Message> {
                 .push(Text::new(result_text))
                 .push(
                     Button::new(Text::new("Play Again"))
-                        .on_press(Message::DifficultySelected) // Restart game
+                        .on_press(Message::Restart) // Restart game
                 )
                 .padding(20)
                 .spacing(10)

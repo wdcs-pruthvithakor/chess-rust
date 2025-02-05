@@ -6,7 +6,7 @@ pub enum Color {
     Black,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum PieceType {
     King,
     Queen,
@@ -16,7 +16,7 @@ pub enum PieceType {
     Pawn,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Piece {
     pub color: Color,
     pub kind: PieceType,
@@ -27,16 +27,16 @@ pub const EMPTY: Option<Piece> = None;
 #[derive(Clone)]
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
-    pub white_castle_possible: bool,
-    pub black_castle_possible: bool,
+    // pub white_castle_possible: bool,
+    // pub black_castle_possible: bool,
 }
 
 impl Board {
     pub fn new() -> Self {
         let mut board = Board {
             squares: [[EMPTY; 8]; 8],
-            white_castle_possible: true,
-            black_castle_possible: true,
+            // white_castle_possible: true,
+            // black_castle_possible: true,
         };
 
         // Initialize board with pieces (only a few for brevity)
@@ -348,14 +348,16 @@ impl Board {
 
     pub fn is_square_under_attack(&self, row: usize, col: usize, color: Color) -> bool {
         let opponent_color = opposite_color(color);
-        
+        let mut temp_board = self.clone();
+        temp_board.squares[row][col] = None;
         // Check all opponent's pieces
         for r in 0..8 {
             for c in 0..8 {
-                if let Some(piece) = self.squares[r][c] {
+                if let Some(piece) = temp_board.squares[r][c] {
                     // If the piece is of the opposite color, generate its moves
                     if piece.color == opponent_color {
-                        let possible_moves = self.generate_moves_for_piece(r, c);
+                        let possible_moves = temp_board.generate_moves_for_piece(r, c);
+                        // println!("{:?} {:?}", piece, possible_moves);
                         // If any move attacks the square
                         if possible_moves.iter().any(|&(_, to)| to == (row, col)) {
                             return true;
@@ -369,83 +371,83 @@ impl Board {
     }
 
     // Check if the given move (from -> to) is a valid castling move
-    pub fn can_castle(&self, from: (usize, usize), to: (usize, usize)) -> bool {
-        let (from_row, from_col) = from;
-        let (to_row, to_col) = to;
+    // pub fn can_castle(&self, from: (usize, usize), to: (usize, usize)) -> bool {
+    //     let (from_row, from_col) = from;
+    //     let (to_row, to_col) = to;
 
-        // Ensure it's a king moving two squares
-        if (from_col == 4) && (to_col == 6 || to_col == 2) && (from_row == to_row) {
-            let color = if from_row == 0 { Color::White } else { Color::Black };
-            let kingside = to_col == 6;
-            let rook_col = if kingside { 7 } else { 0 };
+    //     // Ensure it's a king moving two squares
+    //     if (from_col == 4) && (to_col == 6 || to_col == 2) && (from_row == to_row) {
+    //         let color = if from_row == 0 { Color::White } else { Color::Black };
+    //         let kingside = to_col == 6;
+    //         let rook_col = if kingside { 7 } else { 0 };
 
-            // Castling flag check
-            if color == Color::White && !self.white_castle_possible { return false; }
-            if color == Color::Black && !self.black_castle_possible { return false; }
+    //         // Castling flag check
+    //         if color == Color::White && !self.white_castle_possible { return false; }
+    //         if color == Color::Black && !self.black_castle_possible { return false; }
 
-            // Ensure King and Rook are in their original positions
-            if let Some(Piece { kind: PieceType::King, color: king_color }) = self.squares[from_row][from_col] {
-                if king_color != color {
-                    return false;
-                }
-            } else {
-                return false; // King must be present
-            }
+    //         // Ensure King and Rook are in their original positions
+    //         if let Some(Piece { kind: PieceType::King, color: king_color }) = self.squares[from_row][from_col] {
+    //             if king_color != color {
+    //                 return false;
+    //             }
+    //         } else {
+    //             return false; // King must be present
+    //         }
 
-            if let Some(Piece { kind: PieceType::Rook, color: rook_color }) = self.squares[from_row][rook_col] {
-                if rook_color != color {
-                    return false;
-                }
-            } else {
-                return false; // Rook must be present
-            }
+    //         if let Some(Piece { kind: PieceType::Rook, color: rook_color }) = self.squares[from_row][rook_col] {
+    //             if rook_color != color {
+    //                 return false;
+    //             }
+    //         } else {
+    //             return false; // Rook must be present
+    //         }
 
-            // Ensure the squares between the King and Rook are empty
-            let range = if kingside { 5..7 } else { 1..4 };
-            if range.clone().any(|c| self.squares[from_row][c].is_some()) {
-                return false; // Path must be clear
-            }
+    //         // Ensure the squares between the King and Rook are empty
+    //         let range = if kingside { 5..7 } else { 1..4 };
+    //         if range.clone().any(|c| self.squares[from_row][c].is_some()) {
+    //             return false; // Path must be clear
+    //         }
 
-            // Ensure the King is not in check, moving through check, or landing in check
-            if self.is_in_check(color) { return false; }
-            for col in range {
-                if self.is_square_under_attack(from_row, col, color) { return false; }
-            }
+    //         // Ensure the King is not in check, moving through check, or landing in check
+    //         if self.is_in_check(color) { return false; }
+    //         for col in range {
+    //             if self.is_square_under_attack(from_row, col, color) { return false; }
+    //         }
 
-            // Passed all checks, castling is valid
-            return true;
-        }
+    //         // Passed all checks, castling is valid
+    //         return true;
+    //     }
 
-        false // Not a valid castling move
-    }
+    //     false // Not a valid castling move
+    // }
 
-    // Execute the castling move if valid
-    pub fn castle(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
-        if !self.can_castle(from, to) {
-            return false;
-        }
+    // // Execute the castling move if valid
+    // pub fn castle(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
+    //     if !self.can_castle(from, to) {
+    //         return false;
+    //     }
 
-        let (row, from_col) = from;
-        let to_col = to.1;
-        let kingside = to_col == 6;
-        let rook_col = if kingside { 7 } else { 0 };
-        let new_rook_col = if kingside { 5 } else { 3 };
+    //     let (row, from_col) = from;
+    //     let to_col = to.1;
+    //     let kingside = to_col == 6;
+    //     let rook_col = if kingside { 7 } else { 0 };
+    //     let new_rook_col = if kingside { 5 } else { 3 };
 
-        // Move the King
-        self.squares[row][to_col] = self.squares[row][from_col].take();
+    //     // Move the King
+    //     self.squares[row][to_col] = self.squares[row][from_col].take();
         
-        // Move the Rook
-        self.squares[row][new_rook_col] = self.squares[row][rook_col].take();
+    //     // Move the Rook
+    //     self.squares[row][new_rook_col] = self.squares[row][rook_col].take();
 
-        // Disable further castling for this player
-        if row == 0 {
-            self.white_castle_possible = false;
-        } else {
-            self.black_castle_possible = false;
-        }
+    //     // Disable further castling for this player
+    //     if row == 0 {
+    //         self.white_castle_possible = false;
+    //     } else {
+    //         self.black_castle_possible = false;
+    //     }
 
-        true
-    }
+    //     true
+    // }
 
     pub fn find_king(&self, color: Color) -> Option<(usize, usize)> {
         for row in 0..8 {
@@ -462,10 +464,35 @@ impl Board {
 
     pub fn is_checkmate(&self, color: Color) -> bool {
         if !self.is_in_check(color) {
-            return false;
+            return false; // Not in check, can't be checkmate
         }
-        let moves = self.generate_all_moves(color);
-        moves.is_empty()
+
+        let king_pos = self.find_king(color).unwrap();
+        let king_moves = self.generate_moves_for_piece(king_pos.0, king_pos.1);
+
+        // 1. King escape:
+        for (_, to) in king_moves {
+            if self.is_square_under_attack(to.0, to.1, color) { // Check if the square IS under attack
+                // println!("{to:?} is under attack, cannot escape");
+                continue; // Important: Continue to the next move
+            } else {
+                // println!("{to:?} escapes");
+                return false; // Square is safe, king can escape - NOT checkmate
+            }
+        }
+       
+        // 2. Block/capture:
+        let all_moves = self.generate_all_moves(color); // Get all possible moves for the current player
+
+        for (from, to) in all_moves {
+            let mut temp_board = self.clone();
+            temp_board.apply_move((from,to));
+            if !temp_board.is_in_check(color) {
+                // println!("{from:?} {to:?} escapes");
+                return false; // Block or capture successful
+            }
+        }
+        true // No escape, no block, no capture = Checkmate
     }
 
     pub fn is_draw(&self, color: Color) -> bool {
