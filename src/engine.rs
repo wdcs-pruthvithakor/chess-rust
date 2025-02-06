@@ -182,10 +182,10 @@ impl Board {
                     if new_row >= 0 && new_row < 8 && self.squares[new_row as usize][col].is_none() {
                         moves.push(((row, col), (new_row as usize, col)));
                     }
-                    
+
                     // Double forward move (only allowed on the starting row and if both squares are empty)
                     let starting_row = if piece.color == Color::White { 1 } else { 6 };
-                    if row == starting_row {
+                    if row == starting_row && self.squares[new_row as usize][col].is_none() {
                         let double_row = new_row + direction;  // Calculate the row 2 squares ahead
                         if double_row >= 0 && double_row < 8 && self.squares[double_row as usize][col].is_none() {
                             // Check that the square two steps ahead is empty
@@ -268,25 +268,7 @@ impl Board {
                         }
                     }
                 
-                    // Castling logic
-                    // if let Some(piece) = self.squares[row][col] {
-                    //     if piece.color == Color::White && self.white_castle_possible {
-                    //         if self.can_castle((row, col), (row, 6)) { // Kingside castling
-                    //             moves.push(((row, col), (row, 6)));
-                    //         }
-                    //         if self.can_castle((row, col), (row, 2)) { // Queenside castling
-                    //             moves.push(((row, col), (row, 2)));
-                    //         }
-                    //     }
-                    //     if piece.color == Color::Black && self.black_castle_possible {
-                    //         if self.can_castle((row, col), (row, 6)) { // Kingside castling
-                    //             moves.push(((row, col), (row, 6)));
-                    //         }
-                    //         if self.can_castle((row, col), (row, 2)) { // Queenside castling
-                    //             moves.push(((row, col), (row, 2)));
-                    //         }
-                    //     }
-                    // }
+
                 }                
                 PieceType::Queen => {
                     // Queen moves are a combination of Rook and Bishop moves
@@ -644,8 +626,7 @@ impl Board {
 
         // Simulate the move to check if it leaves the king in check
         let mut simulated_board = self.clone();
-        simulated_board.squares[to.0][to.1] = simulated_board.squares[from.0][from.1];
-        simulated_board.squares[from.0][from.1] = None;
+        simulated_board.apply_move((from, to));
 
         if simulated_board.is_in_check(piece.color) {
             return false; // Move is invalid if it leaves the king in check
@@ -913,4 +894,179 @@ pub fn opposite_color(color: Color) -> Color {
         Color::White => Color::Black,
         Color::Black => Color::White,
     }
+}
+
+pub fn improved_best_move_for_color(
+    board: &Board,
+    color: Color,
+    depth: u32,
+) -> Option<((usize, usize), (usize, usize))> {
+    // Piece values for basic evaluation
+    fn get_piece_value(piece: &Piece) -> i32 {
+        match piece.kind {
+            PieceType::Pawn => 100,
+            PieceType::Knight => 320,
+            PieceType::Bishop => 330,
+            PieceType::Rook => 500,
+            PieceType::Queen => 900,
+            PieceType::King => 20000,
+        }
+    }
+
+    // Fast static evaluation
+    fn evaluate_position(board: &Board) -> i32 {
+        let mut score = 0;
+        
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = board.squares[row][col] {
+                    let mut piece_score = get_piece_value(&piece);
+                    
+                    // Simple position bonus for center control
+                    if (2..=5).contains(&row) && (2..=5).contains(&col) {
+                        piece_score += 10;
+                    }
+                    
+                    score += if piece.color == Color::White {
+                        piece_score
+                    } else {
+                        -piece_score
+                    };
+                }
+            }
+        }
+        score
+    }
+
+    // Simple move scoring for ordering
+    fn score_move(board: &Board, m: &((usize, usize), (usize, usize))) -> i32 {
+        let ((from_row, from_col), (to_row, to_col)) = *m;
+        let mut score = 0;
+
+        // Prioritize captures
+        if let Some(captured_piece) = board.squares[to_row][to_col] {
+            score += get_piece_value(&captured_piece);
+        }
+
+        // Bonus for center control
+        if (2..=5).contains(&to_row) && (2..=5).contains(&to_col) {
+            score += 10;
+        }
+
+        score
+    }
+
+    // Alpha-beta search
+    fn alpha_beta(
+        board: &Board,
+        depth: u32,
+        mut alpha: i32,
+        mut beta: i32,
+        maximizing_player: bool,
+        color: Color,
+    ) -> i32 {
+        if depth == 0 {
+            return evaluate_position(board);
+        }
+
+        let mut moves = board.generate_all_moves(color);
+        
+        // Basic move ordering - sort by captures
+        moves.sort_by_key(|m| -score_move(board, m));
+
+        if maximizing_player {
+            let mut max_eval = i32::MIN;
+            for m in moves {
+                let mut new_board = board.clone();
+                new_board.apply_move(m);
+                
+                // Skip if move leaves king in check
+                if new_board.is_in_check(color) {
+                    continue;
+                }
+                
+                let eval = alpha_beta(
+                    &new_board,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    false,
+                    opposite_color(color),
+                );
+                max_eval = max_eval.max(eval);
+                alpha = alpha.max(eval);
+                if beta <= alpha {
+                    break;
+                }
+            }
+            max_eval
+        } else {
+            let mut min_eval = i32::MAX;
+            for m in moves {
+                let mut new_board = board.clone();
+                new_board.apply_move(m);
+                
+                // Skip if move leaves king in check
+                if new_board.is_in_check(color) {
+                    continue;
+                }
+                
+                let eval = alpha_beta(
+                    &new_board,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    true,
+                    opposite_color(color),
+                );
+                min_eval = min_eval.min(eval);
+                beta = beta.min(eval);
+                if beta <= alpha {
+                    break;
+                }
+            }
+            min_eval
+        }
+    }
+
+    // Main search logic
+    let mut best_move = None;
+    let mut best_value = if color == Color::White { i32::MIN } else { i32::MAX };
+    let mut moves = board.generate_all_moves(color);
+    
+    // Sort moves to improve pruning
+    moves.sort_by_key(|m| -score_move(board, m));
+
+    for m in moves {
+        let mut new_board = board.clone();
+        new_board.apply_move(m);
+        
+        // Skip if move leaves king in check
+        if new_board.is_in_check(color) {
+            continue;
+        }
+        
+        let value = alpha_beta(
+            &new_board,
+            depth - 1,
+            i32::MIN + 1,
+            i32::MAX - 1,
+            color == Color::Black,
+            opposite_color(color),
+        );
+
+        if color == Color::White {
+            if value > best_value {
+                best_value = value;
+                best_move = Some(m);
+            }
+        } else {
+            if value < best_value {
+                best_value = value;
+                best_move = Some(m);
+            }
+        }
+    }
+
+    best_move
 }

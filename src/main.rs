@@ -3,7 +3,7 @@ use iced::{
 };
 use iced::widget::Image;
 mod engine;
-use engine::{Board, Color, PieceType, best_move_for_color, opposite_color};
+use engine::{Board, Color, PieceType, best_move_for_color,improved_best_move_for_color, opposite_color};
 
 #[derive(Debug, Clone, Copy)]
 enum GameResult {
@@ -81,7 +81,7 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                         app.board.apply_move(((sel_row, sel_col), (row, col)));
                         app.selected = None;
                         app.current_turn = opposite_color(app.current_turn);
-                        if app.board.is_checkmate(app.current_turn){
+                        if app.board.is_checkmate(app.current_turn) || app.board.find_king(app.current_turn) == Some((row, col)) {
                             let winner = GameResult::Winner(opposite_color(app.current_turn));
                             return Task::perform(async { () }, move |_| Message::EndGame(winner));
                         } else if app.board.is_draw(app.current_turn) {
@@ -108,7 +108,11 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
         Message::BotMove => {
             // Bot moves as Black.
             if app.current_turn == Color::Black {
-                if let Some(mv) = best_move_for_color(&app.board, Color::Black, app.difficulty) {
+                if app.board.is_in_check(opposite_color(app.current_turn)) {
+                    let winner = GameResult::Winner(app.current_turn);
+                    return Task::perform(async { () }, move |_| Message::EndGame(winner));
+                }
+                if let Some(mv) = improved_best_move_for_color(&app.board, Color::Black, app.difficulty) {
                     app.board.apply_move(mv);
                     app.current_turn = opposite_color(app.current_turn);
                     if app.board.is_checkmate(app.current_turn){
@@ -119,7 +123,6 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                     }
                 }
             }
-
         }
         Message::EndGame(result) => {
             app.state = AppState::GameOver(result);
