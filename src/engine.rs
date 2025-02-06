@@ -1,4 +1,6 @@
 // engine.rs
+use std::collections::HashMap;
+use std::cmp::Reverse;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Color {
@@ -23,6 +25,37 @@ pub struct Piece {
 }
 
 pub const EMPTY: Option<Piece> = None;
+
+struct TranspositionTable {
+    cache: HashMap<u64, (i32, u32)>, // hash, (score, depth)
+    max_entries: usize,
+}
+
+impl TranspositionTable {
+    fn new(max_entries: usize) -> Self {
+        TranspositionTable {
+            cache: HashMap::new(),
+            max_entries,
+        }
+    }
+
+    fn get(&self, hash: u64, depth: u32) -> Option<i32> {
+        self.cache.get(&hash)
+            .filter(|&(_, cached_depth)| *cached_depth >= depth)
+            .map(|(score, _)| *score)
+    }
+
+    fn insert(&mut self, hash: u64, score: i32, depth: u32) {
+        if self.cache.len() >= self.max_entries {
+            // Use a different approach to remove an entry
+            let key_to_remove = self.cache.keys().cloned().next();
+            if let Some(key) = key_to_remove {
+                self.cache.remove(&key);
+            }
+        }
+        self.cache.insert(hash, (score, depth));
+    }
+}
 
 #[derive(Clone)]
 pub struct Board {
@@ -653,6 +686,45 @@ fn evaluate_board(board: &Board) -> i32 {
     score
 }
 
+fn order_moves(board: &Board, moves: &[((usize, usize), (usize, usize))], color: Color) -> Vec<((usize, usize), (usize, usize))> {
+    let mut scored_moves: Vec<_> = moves.iter()
+        .map(|&m| {
+            let mut new_board = board.clone();
+            new_board.apply_move(m);
+            
+            // Score moves based on:
+            // 1. Captures (prioritize capturing high-value pieces)
+            // 2. Checks
+            // 3. Piece development
+            let mut score = 0;
+            
+            // Capture score
+            if let Some(captured_piece) = new_board.squares[m.1.0][m.1.1] {
+                score += match captured_piece.kind {
+                    PieceType::King => 9000,
+                    PieceType::Queen => 90,
+                    PieceType::Rook => 50,
+                    PieceType::Bishop | PieceType::Knight => 30,
+                    PieceType::Pawn => 10,
+                };
+            }
+            
+            // Check bonus
+            if new_board.is_in_check(opposite_color(color)) {
+                score += 10;
+            }
+            
+            (m, score)
+        })
+        .collect();
+    
+    // Sort in descending order of score
+    scored_moves.sort_by_key(|&(_, score)| Reverse(score));
+    
+    // Return just the moves
+    scored_moves.into_iter().map(|(m, _)| m).collect()
+}
+
 fn minimax(
     board: &Board,
     depth: u32,
@@ -692,49 +764,98 @@ fn minimax(
     }
 }
 
+// use rand::seq::SliceRandom;
+// use rand::thread_rng;
+
 pub fn best_move_for_color(
     board: &Board,
     color: Color,
     depth: u32,
 ) -> Option<((usize, usize), (usize, usize))> {
-    let moves = board.generate_all_moves(color);
+    let mut moves = board.generate_all_moves(color);
+    
+    // // Add some randomness at the start of the game or for early moves
+    // let total_pieces = board.squares.iter()
+    //     .flat_map(|row| row.iter())
+    //     .filter(|p| p.is_some())
+    //     .count();
+    
+    // if total_pieces > 28 && depth > 3 {
+    //     // Shuffle moves to introduce variety
+    //     let mut rng = thread_rng();
+    //     moves.shuffle(&mut rng);
+    // }
+    
+    // Order moves for better pruning
+    moves = order_moves(board, &moves, color);
+    
     let mut best_move = None;
     let mut alpha = i32::MIN;
     let mut beta = i32::MAX;
     let mut best_eval = if color == Color::White { i32::MIN } else { i32::MAX };
+    let mut transposition_table = TranspositionTable::new(10000);
 
     for m in moves {
         let mut new_board = board.clone();
         new_board.apply_move(m);
 
-        let eval = minimax(
-            &new_board,
-            depth - 1,
-            color == Color::Black, // is_maximizing_player
-            opposite_color(color),
-            alpha,
-            beta,
-        );
+        // Use hash as a simple board representation for caching
+        let board_hash = calculate_board_hash(&new_board);
+        
+        // Check transposition table
+        let cached_eval = transposition_table.get(board_hash, depth - 1);
+        
+        let eval = if let Some(_) = cached_eval {
+            // If cached, use the cached evaluation
+            cached_eval.unwrap()
+        } else {
+            // Otherwise, compute the evaluation
+            minimax(
+                &new_board,
+                depth - 1,
+                color == Color::Black, 
+                opposite_color(color),
+                alpha,
+                beta,
+            )
+        };
+
+        // Store in transposition table
+        transposition_table.insert(board_hash, eval, depth - 1);
 
         if color == Color::White {
             if eval > best_eval {
                 best_eval = eval;
                 best_move = Some(m);
             }
-            alpha = alpha.max(best_eval); // Update alpha
+            alpha = alpha.max(best_eval);
         } else {
             if eval < best_eval {
                 best_eval = eval;
                 best_move = Some(m);
             }
-            beta = beta.min(best_eval); // Update beta
+            beta = beta.min(best_eval);
         }
 
         if alpha >= beta {
-            break; // Alpha-beta pruning
+            break; 
         }
     }
     best_move
+}
+// Simple board hash function (you'd want a more sophisticated one in practice)
+fn calculate_board_hash(board: &Board) -> u64 {
+    let mut hash = 0;
+    for row in board.squares.iter() {
+        for square in row.iter() {
+            hash ^= match square {
+                Some(piece) => piece.color as u64 | ((piece.kind as u64) << 8),
+                None => 0,
+            };
+            hash = hash.rotate_left(7);
+        }
+    }
+    hash
 }
 
 pub fn opposite_color(color: Color) -> Color {

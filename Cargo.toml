@@ -7,3 +7,4 @@ edition = "2021"
 iced = { version = "0.13", features = ["image"] } # Check for the latest version on crates.io
 iced_lazy = "0.6"
 tokio = { version = "1", features = ["full"] } # Check for the latest version on
+rand = "0.9.0"
