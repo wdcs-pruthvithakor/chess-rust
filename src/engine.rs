@@ -669,6 +669,7 @@ fn evaluate_board(board: &Board) -> i32 {
             PieceType::King => 9000,
         }
     };
+    
 
     for row in 0..8 {
         for col in 0..8 {
@@ -725,6 +726,71 @@ fn order_moves(board: &Board, moves: &[((usize, usize), (usize, usize))], color:
     scored_moves.into_iter().map(|(m, _)| m).collect()
 }
 
+fn quiescence_search(board: &Board, color: Color, alpha: i32, beta: i32, depth_limit: u32) -> i32 {
+    if depth_limit == 0 { // Base case: Reached depth limit
+        return evaluate_board(board); // Evaluate statically
+    }
+
+    let eval = evaluate_board(board);
+    if eval >= beta {
+        return beta;
+    }
+    let mut alpha = alpha.max(eval);
+
+    let all_moves = board.generate_all_moves(color);
+
+    let captures: Vec<_> = all_moves.iter().filter(|&m| is_capture(board, m)).cloned().collect();
+    let ordered_captures = order_moves(board, &captures, color);
+
+    for capture in ordered_captures.clone() {
+        let ((_, _), (to_row, to_col)) = capture;
+           if let Some(captured_piece) = board.squares[to_row][to_col] {
+               let captured_value = match captured_piece.kind {  // Define piece values
+                    PieceType::Pawn => 10,
+                    PieceType::Knight => 30,
+                    PieceType::Bishop => 30,
+                    PieceType::Rook => 50,
+                    PieceType::Queen => 90,
+                    PieceType::King => 9000,
+               };
+
+               // Delta Pruning:  If the capture is not likely to improve the score, skip it.
+               if eval + captured_value < alpha - 100 { // 100 is a margin, adjust as needed
+                   continue; // Skip this capture
+               }
+           }
+        let mut new_board = board.clone();
+        new_board.apply_move(capture);
+        let eval = -quiescence_search(&new_board, opposite_color(color), -beta, -alpha, depth_limit - 1); // Decrement depth
+        if eval >= beta {
+            return beta;
+        }
+        alpha = alpha.max(eval);
+    }
+
+    // Now, consider quiet moves (if no captures were good enough):
+    if ordered_captures.is_empty() { // If no captures were good enough
+        let quiet_moves: Vec<_> = all_moves.iter().filter(|&m| !is_capture(board, m)).cloned().collect();
+        for quiet_move in quiet_moves {
+            let mut new_board = board.clone();
+            new_board.apply_move(quiet_move);
+            let eval = -quiescence_search(&new_board, opposite_color(color), -beta, -alpha, depth_limit - 1); // Decrement depth
+            if eval >= beta {
+                return beta;
+            }
+            alpha = alpha.max(eval);
+        }
+    }
+
+    alpha
+}
+
+// Helper function to check if a move is a capture
+fn is_capture(board: &Board, m: &((usize, usize), (usize, usize))) -> bool {
+    let ((_, _), (to_row, to_col)) = *m;
+    board.squares[to_row][to_col].is_some() // Check if there's a piece at the target square
+}
+
 fn minimax(
     board: &Board,
     depth: u32,
@@ -732,40 +798,51 @@ fn minimax(
     color: Color,
     mut alpha: i32,
     mut beta: i32,
+    transposition_table: &mut TranspositionTable, // Pass the transposition table
 ) -> i32 {
     if depth == 0 || board.is_checkmate(Color::White) || board.is_checkmate(Color::Black) {
-        return evaluate_board(board); // Assume `evaluate` returns an integer score
+        return quiescence_search(board, color, alpha, beta, 3);
     }
 
     let moves = board.generate_all_moves(color);
-    
+    let ordered_moves = order_moves(board, &moves, color);
+    let board_hash = calculate_board_hash(board); // Hash current board
+
+    if let Some(cached_eval) = transposition_table.get(board_hash, depth) {
+        return cached_eval;
+    }
+
     if is_maximizing_player {
         let mut max_eval = i32::MIN;
-        for m in moves {
+        for m in ordered_moves {
             let mut new_board = board.clone();
             new_board.apply_move(m);
-            let eval = minimax(&new_board, depth - 1, false, opposite_color(color), alpha, beta);
+            let eval = minimax(&new_board, depth - 1, false, opposite_color(color), alpha, beta, transposition_table);
             max_eval = max_eval.max(eval);
             alpha = alpha.max(eval);
-            if alpha >= beta { break; } // Pruning
+            if alpha >= beta {
+                break; // Pruning
+            }
         }
+        transposition_table.insert(board_hash, max_eval, depth); // Store the result
         max_eval
     } else {
         let mut min_eval = i32::MAX;
-        for m in moves {
+        for m in ordered_moves {
             let mut new_board = board.clone();
             new_board.apply_move(m);
-            let eval = minimax(&new_board, depth - 1, true, opposite_color(color), alpha, beta);
+            let eval = minimax(&new_board, depth - 1, true, opposite_color(color), alpha, beta, transposition_table);
             min_eval = min_eval.min(eval);
             beta = beta.min(eval);
-            if alpha >= beta { break; } // Pruning
+            if alpha >= beta {
+                break; // Pruning
+            }
         }
+        transposition_table.insert(board_hash, min_eval, depth); // Store the result
         min_eval
     }
 }
 
-// use rand::seq::SliceRandom;
-// use rand::thread_rng;
 
 pub fn best_move_for_color(
     board: &Board,
@@ -773,55 +850,27 @@ pub fn best_move_for_color(
     depth: u32,
 ) -> Option<((usize, usize), (usize, usize))> {
     let mut moves = board.generate_all_moves(color);
-    
-    // // Add some randomness at the start of the game or for early moves
-    // let total_pieces = board.squares.iter()
-    //     .flat_map(|row| row.iter())
-    //     .filter(|p| p.is_some())
-    //     .count();
-    
-    // if total_pieces > 28 && depth > 3 {
-    //     // Shuffle moves to introduce variety
-    //     let mut rng = thread_rng();
-    //     moves.shuffle(&mut rng);
-    // }
-    
-    // Order moves for better pruning
-    moves = order_moves(board, &moves, color);
-    
+    moves = order_moves(board, &moves, color); // Order moves for better pruning
+
     let mut best_move = None;
     let mut alpha = i32::MIN;
     let mut beta = i32::MAX;
     let mut best_eval = if color == Color::White { i32::MIN } else { i32::MAX };
-    let mut transposition_table = TranspositionTable::new(10000);
+    let mut transposition_table = TranspositionTable::new(10000); // Create transposition table
 
     for m in moves {
         let mut new_board = board.clone();
         new_board.apply_move(m);
 
-        // Use hash as a simple board representation for caching
-        let board_hash = calculate_board_hash(&new_board);
-        
-        // Check transposition table
-        let cached_eval = transposition_table.get(board_hash, depth - 1);
-        
-        let eval = if let Some(_) = cached_eval {
-            // If cached, use the cached evaluation
-            cached_eval.unwrap()
-        } else {
-            // Otherwise, compute the evaluation
-            minimax(
-                &new_board,
-                depth - 1,
-                color == Color::Black, 
-                opposite_color(color),
-                alpha,
-                beta,
-            )
-        };
-
-        // Store in transposition table
-        transposition_table.insert(board_hash, eval, depth - 1);
+        let eval = minimax(
+            &new_board,
+            depth - 1,
+            color == Color::Black,
+            opposite_color(color),
+            alpha,
+            beta,
+            &mut transposition_table, // Pass the transposition table here
+        );
 
         if color == Color::White {
             if eval > best_eval {
@@ -838,11 +887,12 @@ pub fn best_move_for_color(
         }
 
         if alpha >= beta {
-            break; 
+            break;
         }
     }
     best_move
 }
+
 // Simple board hash function (you'd want a more sophisticated one in practice)
 fn calculate_board_hash(board: &Board) -> u64 {
     let mut hash = 0;
