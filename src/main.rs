@@ -121,6 +121,9 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                     } else if app.board.is_draw(app.current_turn) {
                         return Task::perform(async { () },  |_| Message::EndGame(GameResult::Draw));
                     }
+                } else {
+                    let winner = GameResult::Winner(opposite_color(app.current_turn));
+                    return Task::perform(async { () }, move |_| Message::EndGame(winner));
                 }
             }
         }
