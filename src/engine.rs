@@ -26,40 +26,11 @@ pub struct Piece {
 
 pub const EMPTY: Option<Piece> = None;
 
-struct TranspositionTable {
-    cache: HashMap<u64, (i32, u32)>, // hash, (score, depth)
-    max_entries: usize,
-}
-
-impl TranspositionTable {
-    fn new(max_entries: usize) -> Self {
-        TranspositionTable {
-            cache: HashMap::new(),
-            max_entries,
-        }
-    }
-
-    fn get(&self, hash: u64, depth: u32) -> Option<i32> {
-        self.cache.get(&hash)
-            .filter(|&(_, cached_depth)| *cached_depth >= depth)
-            .map(|(score, _)| *score)
-    }
-
-    fn insert(&mut self, hash: u64, score: i32, depth: u32) {
-        if self.cache.len() >= self.max_entries {
-            // Use a different approach to remove an entry
-            let key_to_remove = self.cache.keys().cloned().next();
-            if let Some(key) = key_to_remove {
-                self.cache.remove(&key);
-            }
-        }
-        self.cache.insert(hash, (score, depth));
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
+    pub half_move_clock: u32, // Tracks moves since last pawn move or capture
     // pub white_castle_possible: bool,
     // pub black_castle_possible: bool,
 }
@@ -68,6 +39,7 @@ impl Board {
     pub fn new() -> Self {
         let mut board = Board {
             squares: [[EMPTY; 8]; 8],
+            half_move_clock: 0,
             // white_castle_possible: true,
             // black_castle_possible: true,
         };
@@ -353,6 +325,13 @@ impl Board {
         // }
         if let Some(mut piece) = self.squares[from_row][from_col] {
             self.squares[from_row][from_col] = EMPTY;
+
+            // Update half-move clock on captures or pawn moves
+            if piece.kind == PieceType::Pawn || self.squares[to_row][to_col].is_some() {
+                self.half_move_clock = 0; // Reset clock on pawn move or capture
+            } else {
+                self.half_move_clock += 1;
+            }
             if piece.kind == PieceType::Pawn && (to_row == 0 || to_row == 7) {
                 // Promote to a Queen (can be extended for other choices)
                 piece.kind = PieceType::Queen;
@@ -502,7 +481,7 @@ impl Board {
     }
 
     pub fn is_draw(&self, color: Color) -> bool {
-        self.is_stalemate(color) || !self.has_sufficient_material()
+        self.is_stalemate(color) || !self.has_sufficient_material() || self.half_move_clock >= 50
     }
 
     fn is_stalemate(&self, color: Color) -> bool {
