@@ -615,6 +615,7 @@ pub fn opposite_color(color: Color) -> Color {
         Color::Black => Color::White,
     }
 }
+use std::thread;
 
 pub fn improved_best_move_for_color(
     board: &Board,
@@ -636,7 +637,7 @@ pub fn improved_best_move_for_color(
     // Fast static evaluation
     fn evaluate_position(board: &Board) -> i32 {
         let mut score = 0;
-        
+
         for row in 0..8 {
             for col in 0..8 {
                 if let Some(piece) = board.squares[row][col] {
@@ -676,7 +677,7 @@ pub fn improved_best_move_for_color(
         score
     }
 
-    // Alpha-beta search
+    // Alpha-beta search (will be called in parallel for different moves)
     fn alpha_beta(
         board: &Board,
         depth: u32,
@@ -690,7 +691,7 @@ pub fn improved_best_move_for_color(
         }
 
         let mut moves = board.generate_all_moves(color);
-        
+
         // Basic move ordering - sort by captures
         moves.sort_by_key(|m| -score_move(board, m));
 
@@ -757,35 +758,54 @@ pub fn improved_best_move_for_color(
         }
     }
 
-    // Main search logic
+    // Main search logic with threading
     let mut best_move = None;
     let mut best_value = if color == Color::White { i32::MIN } else { i32::MAX };
     let mut moves = board.generate_all_moves(color);
-    
+
     // Sort moves to improve pruning
     moves.sort_by_key(|m| -score_move(board, m));
 
+    let mut handles = vec![];
+
+    // Create threads for each move evaluation
     for m in moves {
-        let mut new_board = board.clone();
-        new_board.apply_move(m);
-        
-        // Skip if move leaves king in check
-        if let Some(king_pos) = new_board.find_king(color) {
-            if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                continue; // Skip this move: King would be capturable
+        let board_clone = board.clone();
+        let color_clone = color;
+        let depth_clone = depth;
+        let mut alpha = i32::MIN + 1;
+        let mut beta = i32::MAX - 1;
+
+        let handle = thread::spawn(move || {
+            let mut new_board = board_clone.clone();
+            new_board.apply_move(m);
+
+            // Skip if move leaves king in check
+            if let Some(king_pos) = new_board.find_king(color_clone) {
+                if new_board.is_square_under_attack(king_pos.0, king_pos.1, color_clone) {
+                    return i32::MIN; // Invalid move: King would be capturable
+                }
+            } else {
+                return i32::MIN; // Invalid move: King would be captured
             }
-        } else {
-            continue; // Skip this move: King would be captured
-        }
-        
-        let value = alpha_beta(
-            &new_board,
-            depth - 1,
-            i32::MIN + 1,
-            i32::MAX - 1,
-            color == Color::Black,
-            opposite_color(color),
-        );
+
+            // Perform alpha-beta search
+            alpha_beta(
+                &new_board,
+                depth_clone - 1,
+                alpha,
+                beta,
+                color_clone == Color::Black,
+                opposite_color(color_clone),
+            )
+        });
+
+        handles.push((handle, m));
+    }
+
+    // Collect results and determine the best move
+    for (handle, m) in handles {
+        let value = handle.join().unwrap();
 
         if color == Color::White {
             if value > best_value {
