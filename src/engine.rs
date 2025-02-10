@@ -622,7 +622,6 @@ pub fn improved_best_move_for_color(
     color: Color,
     depth: u32,
 ) -> Option<((usize, usize), (usize, usize))> {
-    // Piece values for basic evaluation
     fn get_piece_value(piece: &Piece) -> i32 {
         match piece.kind {
             PieceType::Pawn => 100,
@@ -634,50 +633,34 @@ pub fn improved_best_move_for_color(
         }
     }
 
-    // Fast static evaluation
     fn evaluate_position(board: &Board) -> i32 {
         let mut score = 0;
-
         for row in 0..8 {
             for col in 0..8 {
                 if let Some(piece) = board.squares[row][col] {
                     let mut piece_score = get_piece_value(&piece);
-                    
-                    // Simple position bonus for center control
                     if (2..=5).contains(&row) && (2..=5).contains(&col) {
                         piece_score += 10;
                     }
-                    
-                    score += if piece.color == Color::White {
-                        piece_score
-                    } else {
-                        -piece_score
-                    };
+                    score += if piece.color == Color::White { piece_score } else { -piece_score };
                 }
             }
         }
         score
     }
 
-    // Simple move scoring for ordering
     fn score_move(board: &Board, m: &((usize, usize), (usize, usize))) -> i32 {
-        let ((from_row, from_col), (to_row, to_col)) = *m;
+        let ((_, _), (to_row, to_col)) = *m;
         let mut score = 0;
-
-        // Prioritize captures
         if let Some(captured_piece) = board.squares[to_row][to_col] {
             score += get_piece_value(&captured_piece);
         }
-
-        // Bonus for center control
         if (2..=5).contains(&to_row) && (2..=5).contains(&to_col) {
             score += 10;
         }
-
         score
     }
 
-    // Alpha-beta search (will be called in parallel for different moves)
     fn alpha_beta(
         board: &Board,
         depth: u32,
@@ -691,8 +674,6 @@ pub fn improved_best_move_for_color(
         }
 
         let mut moves = board.generate_all_moves(color);
-
-        // Basic move ordering - sort by captures
         moves.sort_by_key(|m| -score_move(board, m));
 
         if maximizing_player {
@@ -700,16 +681,15 @@ pub fn improved_best_move_for_color(
             for m in moves {
                 let mut new_board = board.clone();
                 new_board.apply_move(m);
-                
-                // Skip if move leaves king in check
+
                 if let Some(king_pos) = new_board.find_king(color) {
                     if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue; // Skip this move: King would be capturable
+                        continue; // Skip this move
                     }
                 } else {
-                    continue; // Skip this move: King would be captured
+                    continue;
                 }
-                
+
                 let eval = alpha_beta(
                     &new_board,
                     depth - 1,
@@ -730,16 +710,15 @@ pub fn improved_best_move_for_color(
             for m in moves {
                 let mut new_board = board.clone();
                 new_board.apply_move(m);
-                
-                // Skip if move leaves king in check
+
                 if let Some(king_pos) = new_board.find_king(color) {
                     if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue; // Skip this move: King would be capturable
+                        continue;
                     }
                 } else {
-                    continue; // Skip this move: King would be captured
+                    continue;
                 }
-                
+
                 let eval = alpha_beta(
                     &new_board,
                     depth - 1,
@@ -768,33 +747,30 @@ pub fn improved_best_move_for_color(
 
     let mut handles = vec![];
 
-    // Create threads for each move evaluation
+    // Launch threads only for legal moves
     for m in moves {
-        let board_clone = board.clone();
+        let mut new_board = board.clone();
+        new_board.apply_move(m);
+
+        // Check if move leaves the king in check **before** spawning a thread
+        if let Some(king_pos) = new_board.find_king(color) {
+            if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
+                continue; // Skip this move
+            }
+        } else {
+            continue; // Skip this move
+        }
+
+        let board_clone = new_board.clone();
         let color_clone = color;
         let depth_clone = depth;
-        let mut alpha = i32::MIN + 1;
-        let mut beta = i32::MAX - 1;
 
         let handle = thread::spawn(move || {
-            let mut new_board = board_clone.clone();
-            new_board.apply_move(m);
-
-            // Skip if move leaves king in check
-            if let Some(king_pos) = new_board.find_king(color_clone) {
-                if new_board.is_square_under_attack(king_pos.0, king_pos.1, color_clone) {
-                    return i32::MIN; // Invalid move: King would be capturable
-                }
-            } else {
-                return i32::MIN; // Invalid move: King would be captured
-            }
-
-            // Perform alpha-beta search
             alpha_beta(
-                &new_board,
+                &board_clone,
                 depth_clone - 1,
-                alpha,
-                beta,
+                i32::MIN + 1,
+                i32::MAX - 1,
                 color_clone == Color::Black,
                 opposite_color(color_clone),
             )
