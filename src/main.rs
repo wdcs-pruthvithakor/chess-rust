@@ -137,101 +137,101 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
 /// View function for the application.
 /// It receives an immutable reference to our state and returns an Element.
 fn view(app: &ChessApp) -> Element<Message> {
-     match &app.state {
-        AppState::SelectingDifficulty => {
-            Column::new()
-                .push(Text::new("Select Difficulty"))
-                .push(
-                    slider(2.0..=9.0, app.slider_value, Message::SliderChanged)
-                        .step(1.0) // Step makes it snap to whole numbers
-                )
-                .push(Text::new(format!("Difficulty: {}", app.slider_value.round() as u32)))
-                .push(
-                    Button::new(Text::new("Start Game"))
-                        .on_press(Message::DifficultySelected)
-                )
-                .padding(20)
-                .spacing(10)
-                .into()
-        }
-        AppState::Playing => {
-            let mut board_view = Column::new().spacing(0);
+    match &app.state {
+       AppState::SelectingDifficulty => {
+           Column::new()
+               .push(Text::new("Select Difficulty"))
+               .push(
+                   slider(2.0..=9.0, app.slider_value, Message::SliderChanged)
+                       .step(1.0) // Step makes it snap to whole numbers
+               )
+               .push(Text::new(format!("Difficulty: {}", app.slider_value.round() as u32)))
+               .push(
+                   Button::new(Text::new("Start Game"))
+                       .on_press(Message::DifficultySelected)
+               )
+               .padding(20)
+               .spacing(10)
+               .into()
+       }
+       AppState::Playing => {
+           let mut board_view = Column::new().spacing(0);
 
-            for r in 0..8 {
-                let mut row_view = Row::new().spacing(0);
-                for c in 0..8 {
-                    let is_light = (r + c) % 2 == 0;
-                    let square_color = if is_light { "#F0D9B5" } else { "#B58863" };
+           for r in (0..8).rev() { // Iterate rows from 7 to 0 to make white pieces on the bottom
+               let mut row_view = Row::new().spacing(0);
+               for c in 0..8 {
+                   let is_light = (r + c) % 2 == 0;
+                   let square_color = if is_light { "#F0D9B5" } else { "#B58863" };
 
-                    // Highlight selected square
-                    let highlight_color = if let Some((sel_row, sel_col)) = app.selected {
-                        if r == sel_row && c == sel_col {
-                            "#FFDD00" // A bright yellow for the selected square
-                        } else {
-                            square_color // Default square color
-                        }
-                    } else {
-                        square_color // Default square color if nothing is selected
-                    };
+                   // Highlight selected square
+                   let highlight_color = if let Some((sel_row, sel_col)) = app.selected {
+                       if r == sel_row && c == sel_col {
+                           "#FFDD00" // A bright yellow for the selected square
+                       } else {
+                           square_color // Default square color
+                       }
+                   } else {
+                       square_color // Default square color if nothing is selected
+                   };
 
-                    let square_content: Element<'static, Message> = app.board.squares[r][c].and_then(|piece| {
-                        let asset: &str = match (piece.color, piece.kind) {
-                            (Color::White, PieceType::Pawn) => "assets/white_pawn.jpeg",
-                            (Color::Black, PieceType::Pawn) => "assets/black_pawn.png",
-                            (Color::White, PieceType::King) => "assets/white_king.jpeg",
-                            (Color::Black, PieceType::King) => "assets/black_king.png",
-                            (Color::White, PieceType::Queen) => "assets/white_queen.jpeg",
-                            (Color::Black, PieceType::Queen) => "assets/black_queen.jpeg",
-                            (Color::White, PieceType::Rook) => "assets/white_rook.png",
-                            (Color::Black, PieceType::Rook) => "assets/black_rook.png",
-                            (Color::White, PieceType::Knight) => "assets/white_knight.jpeg",
-                            (Color::Black, PieceType::Knight) => "assets/black_knight.jpeg",
-                            (Color::White, PieceType::Bishop) => "assets/white_bishop.jpeg",
-                            (Color::Black, PieceType::Bishop) => "assets/black_bishop.png",
-                        };
-                        let handle = image::Handle::from_path(asset); // Create the handle
-                        Some(Image::new(handle).into())
-                    }).unwrap_or_else(|| { // Handle the None case directly
-                        Container::new(Text::new(""))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                            .into()
-                    });
+                   let square_content: Element<'static, Message> = app.board.squares[r][c].and_then(|piece| {
+                       let asset: &str = match (piece.color, piece.kind) {
+                           (Color::White, PieceType::Pawn) => "assets/white_pawn.jpeg",
+                           (Color::Black, PieceType::Pawn) => "assets/black_pawn.png",
+                           (Color::White, PieceType::King) => "assets/white_king.jpeg",
+                           (Color::Black, PieceType::King) => "assets/black_king.png",
+                           (Color::White, PieceType::Queen) => "assets/white_queen.jpeg",
+                           (Color::Black, PieceType::Queen) => "assets/black_queen.jpeg",
+                           (Color::White, PieceType::Rook) => "assets/white_rook.png",
+                           (Color::Black, PieceType::Rook) => "assets/black_rook.png",
+                           (Color::White, PieceType::Knight) => "assets/white_knight.jpeg",
+                           (Color::Black, PieceType::Knight) => "assets/black_knight.jpeg",
+                           (Color::White, PieceType::Bishop) => "assets/white_bishop.jpeg",
+                           (Color::Black, PieceType::Bishop) => "assets/black_bishop.png",
+                       };
+                       let handle = image::Handle::from_path(asset); // Create the handle
+                       Some(Image::new(handle).into())
+                   }).unwrap_or_else(|| { // Handle the None case directly
+                       Container::new(Text::new(""))
+                           .width(Length::Fill)
+                           .height(Length::Fill)
+                           .center_x(Length::Fill)
+                           .center_y(Length::Fill)
+                           .into()
+                   });
 
-                    let square = Button::new(square_content) // Use Button directly with container
-                        .style(|_theme: &Theme, _style| BoardSquareStyle { color: highlight_color }.style()) // Style the Button
-                        .on_press(Message::SquareClicked(r, c))
-                        .width(Length::FillPortion(1))
-                        .height(Length::FillPortion(1));
+                   let square = Button::new(square_content) // Use Button directly with container
+                       .style(|_theme: &Theme, _style| BoardSquareStyle { color: highlight_color }.style()) // Style the Button
+                       .on_press(Message::SquareClicked(r, c))
+                       .width(Length::FillPortion(1))
+                       .height(Length::FillPortion(1));
 
-                        row_view = row_view.push(square); // Reassign row_view
-                    }
-                    board_view = board_view.push(row_view); // Reassign board_view
-                }
-            
-                board_view.into() // Convert the final Column to an Element
+                   row_view = row_view.push(square); // Reassign row_view
+               }
+               board_view = board_view.push(row_view); // Reassign board_view
+           }
+           
+           board_view.into() // Convert the final Column to an Element
 
-        }
-        AppState::GameOver(result) => {
-            let result_text = match result {
-                GameResult::Winner(color) => format!("{:?} Wins!", color),
-                GameResult::Draw => "It's a Draw!".to_string(),
-            };
+       }
+       AppState::GameOver(result) => {
+           let result_text = match result {
+               GameResult::Winner(color) => format!("{:?} Wins!", color),
+               GameResult::Draw => "It's a Draw!".to_string(),
+           };
 
-            Column::new()
-                .push(Text::new("Game Over"))
-                .push(Text::new(result_text))
-                .push(
-                    Button::new(Text::new("Play Again"))
-                        .on_press(Message::Restart) // Restart game
-                )
-                .padding(20)
-                .spacing(10)
-                .into()
-        }
-    }
+           Column::new()
+               .push(Text::new("Game Over"))
+               .push(Text::new(result_text))
+               .push(
+                   Button::new(Text::new("Play Again"))
+                       .on_press(Message::Restart) // Restart game
+               )
+               .padding(20)
+               .spacing(10)
+               .into()
+       }
+   }
 }
 
 /// Helper struct for styling a board square.
