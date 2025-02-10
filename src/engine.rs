@@ -1,7 +1,6 @@
 // engine.rs
 use std::collections::HashMap;
 use std::cmp::Reverse;
-use rand::Rng;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Color {
@@ -27,37 +26,20 @@ pub struct Piece {
 
 pub const EMPTY: Option<Piece> = None;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-struct ZobristHash(u64);
 
 #[derive(Clone, Debug)]
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
     pub half_move_clock: u32, // Tracks moves since last pawn move or capture
-    hash: ZobristHash,
-    zobrist_table: [[[u64; 8]; 8]; 12], // Store Zobrist values in the board
     // pub white_castle_possible: bool,
     // pub black_castle_possible: bool,
 }
 
 impl Board {
     pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
-        
-        // Initialize Zobrist table
-        let mut zobrist_table = [[[0u64; 8]; 8]; 12];
-        for piece in 0..12 {
-            for row in 0..8 {
-                for col in 0..8 {
-                    zobrist_table[piece][row][col] = rng.gen::<u64>();
-                }
-            }
-        }
         let mut board = Board {
             squares: [[EMPTY; 8]; 8],
             half_move_clock: 0,
-            hash: ZobristHash(0),
-            zobrist_table,
             // white_castle_possible: true,
             // black_castle_possible: true,
         };
@@ -145,42 +127,9 @@ impl Board {
             color: Color::Black,
             kind: PieceType::Bishop,
         });
-        // Initialize hash
-        board.initialize_hash();
+
         board
     }
-
-    fn get_piece_index(piece: Piece) -> usize {
-        let base = match piece.color {
-            Color::White => 0,
-            Color::Black => 6,
-        };
-        
-        base + match piece.kind {
-            PieceType::Pawn => 0,
-            PieceType::Knight => 1,
-            PieceType::Bishop => 2,
-            PieceType::Rook => 3,
-            PieceType::Queen => 4,
-            PieceType::King => 5,
-        }
-    }
-
-    fn initialize_hash(&mut self) {
-        let mut hash = 0u64;
-        
-        for row in 0..8 {
-            for col in 0..8 {
-                if let Some(piece) = self.squares[row][col] {
-                    let piece_index = Self::get_piece_index(piece);
-                    hash ^= self.zobrist_table[piece_index][row][col];
-                }
-            }
-        }
-        
-        self.hash = ZobristHash(hash);
-    }
-
 
     // Insert your custom move generation, evaluation, minimax, etc. here.
 
@@ -374,19 +323,6 @@ impl Board {
         //     self.castle((from_row, from_col), (to_row, to_col));
         //     return;
         // }
-
-        // Update hash for the source square (XOR out the moving piece)
-        if let Some(piece) = self.squares[from_row][from_col] {
-            let piece_index = Self::get_piece_index(piece);
-            self.hash.0 ^= self.zobrist_table[piece_index][from_row][from_col];
-        }
-        
-        // Update hash for the destination square (XOR out captured piece if any)
-        if let Some(captured_piece) = self.squares[to_row][to_col] {
-            let captured_index = Self::get_piece_index(captured_piece);
-            self.hash.0 ^= self.zobrist_table[captured_index][to_row][to_col];
-        }
-
         if let Some(mut piece) = self.squares[from_row][from_col] {
             self.squares[from_row][from_col] = EMPTY;
 
@@ -400,11 +336,6 @@ impl Board {
                 // Promote to a Queen (can be extended for other choices)
                 piece.kind = PieceType::Queen;
             }
-
-            // Update hash for the piece's new position
-            let piece_index = Self::get_piece_index(piece);
-            self.hash.0 ^= self.zobrist_table[piece_index][to_row][to_col];
-
             self.squares[to_row][to_col] = Some(piece);
         }
     }    
@@ -685,22 +616,6 @@ pub fn opposite_color(color: Color) -> Color {
     }
 }
 
-// Add TranspositionEntry struct
-#[derive(Clone)]
-struct TranspositionEntry {
-    depth: u32,
-    score: i32,
-    flag: NodeType,
-    best_move: Option<((usize, usize), (usize, usize))>,
-}
-
-#[derive(Clone, Copy)]
-enum NodeType {
-    Exact,
-    LowerBound,
-    UpperBound,
-}
-
 pub fn improved_best_move_for_color(
     board: &Board,
     color: Color,
@@ -743,6 +658,25 @@ pub fn improved_best_move_for_color(
         score
     }
 
+    // Simple move scoring for ordering
+    fn score_move(board: &Board, m: &((usize, usize), (usize, usize))) -> i32 {
+        let ((from_row, from_col), (to_row, to_col)) = *m;
+        let mut score = 0;
+
+        // Prioritize captures
+        if let Some(captured_piece) = board.squares[to_row][to_col] {
+            score += get_piece_value(&captured_piece);
+        }
+
+        // Bonus for center control
+        if (2..=5).contains(&to_row) && (2..=5).contains(&to_col) {
+            score += 10;
+        }
+
+        score
+    }
+
+    // Alpha-beta search
     fn alpha_beta(
         board: &Board,
         depth: u32,
@@ -750,39 +684,15 @@ pub fn improved_best_move_for_color(
         mut beta: i32,
         maximizing_player: bool,
         color: Color,
-        tt: &mut HashMap<ZobristHash, TranspositionEntry>,
     ) -> i32 {
-        // Check transposition table
-        if let Some(entry) = tt.get(&board.hash) {
-            if entry.depth >= depth {
-                match entry.flag {
-                    NodeType::Exact => return entry.score,
-                    NodeType::LowerBound => alpha = alpha.max(entry.score),
-                    NodeType::UpperBound => beta = beta.min(entry.score),
-                }
-                if alpha >= beta {
-                    return entry.score;
-                }
-            }
-        }
-
         if depth == 0 {
-            let score = evaluate_position(board);
-            tt.insert(
-                board.hash,
-                TranspositionEntry {
-                    depth,
-                    score,
-                    flag: NodeType::Exact,
-                    best_move: None,
-                },
-            );
-            return score;
+            return evaluate_position(board);
         }
 
         let mut moves = board.generate_all_moves(color);
-        let mut best_move = None;
-        let old_alpha = alpha;
+        
+        // Basic move ordering - sort by captures
+        moves.sort_by_key(|m| -score_move(board, m));
 
         if maximizing_player {
             let mut max_eval = i32::MIN;
@@ -790,12 +700,13 @@ pub fn improved_best_move_for_color(
                 let mut new_board = board.clone();
                 new_board.apply_move(m);
                 
+                // Skip if move leaves king in check
                 if let Some(king_pos) = new_board.find_king(color) {
                     if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue;
+                        continue; // Skip this move: King would be capturable
                     }
                 } else {
-                    continue;
+                    continue; // Skip this move: King would be captured
                 }
                 
                 let eval = alpha_beta(
@@ -805,37 +716,13 @@ pub fn improved_best_move_for_color(
                     beta,
                     false,
                     opposite_color(color),
-                    tt,
                 );
-                
-                if eval > max_eval {
-                    max_eval = eval;
-                    best_move = Some(m);
-                }
+                max_eval = max_eval.max(eval);
                 alpha = alpha.max(eval);
                 if beta <= alpha {
                     break;
                 }
             }
-            
-            let flag = if max_eval <= old_alpha {
-                NodeType::UpperBound
-            } else if max_eval >= beta {
-                NodeType::LowerBound
-            } else {
-                NodeType::Exact
-            };
-            
-            tt.insert(
-                board.hash,
-                TranspositionEntry {
-                    depth,
-                    score: max_eval,
-                    flag,
-                    best_move,
-                },
-            );
-            
             max_eval
         } else {
             let mut min_eval = i32::MAX;
@@ -843,12 +730,13 @@ pub fn improved_best_move_for_color(
                 let mut new_board = board.clone();
                 new_board.apply_move(m);
                 
+                // Skip if move leaves king in check
                 if let Some(king_pos) = new_board.find_king(color) {
                     if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue;
+                        continue; // Skip this move: King would be capturable
                     }
                 } else {
-                    continue;
+                    continue; // Skip this move: King would be captured
                 }
                 
                 let eval = alpha_beta(
@@ -858,53 +746,59 @@ pub fn improved_best_move_for_color(
                     beta,
                     true,
                     opposite_color(color),
-                    tt,
                 );
-                
-                if eval < min_eval {
-                    min_eval = eval;
-                    best_move = Some(m);
-                }
+                min_eval = min_eval.min(eval);
                 beta = beta.min(eval);
                 if beta <= alpha {
                     break;
                 }
             }
-            
-            let flag = if min_eval <= old_alpha {
-                NodeType::UpperBound
-            } else if min_eval >= beta {
-                NodeType::LowerBound
-            } else {
-                NodeType::Exact
-            };
-            
-            tt.insert(
-                board.hash,
-                TranspositionEntry {
-                    depth,
-                    score: min_eval,
-                    flag,
-                    best_move,
-                },
-            );
-            
             min_eval
         }
     }
 
-    // Main search with transposition table
-    let mut tt = HashMap::new();
-    let value = alpha_beta(
-        board,
-        depth,
-        i32::MIN + 1,
-        i32::MAX - 1,
-        color == Color::White,
-        color,
-        &mut tt,
-    );
+    // Main search logic
+    let mut best_move = None;
+    let mut best_value = if color == Color::White { i32::MIN } else { i32::MAX };
+    let mut moves = board.generate_all_moves(color);
+    
+    // Sort moves to improve pruning
+    moves.sort_by_key(|m| -score_move(board, m));
 
-    // Return the best move from the root position's transposition entry
-    tt.get(&board.hash).and_then(|entry| entry.best_move)
+    for m in moves {
+        let mut new_board = board.clone();
+        new_board.apply_move(m);
+        
+        // Skip if move leaves king in check
+        if let Some(king_pos) = new_board.find_king(color) {
+            if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
+                continue; // Skip this move: King would be capturable
+            }
+        } else {
+            continue; // Skip this move: King would be captured
+        }
+        
+        let value = alpha_beta(
+            &new_board,
+            depth - 1,
+            i32::MIN + 1,
+            i32::MAX - 1,
+            color == Color::Black,
+            opposite_color(color),
+        );
+
+        if color == Color::White {
+            if value > best_value {
+                best_value = value;
+                best_move = Some(m);
+            }
+        } else {
+            if value < best_value {
+                best_value = value;
+                best_move = Some(m);
+            }
+        }
+    }
+
+    best_move
 }
