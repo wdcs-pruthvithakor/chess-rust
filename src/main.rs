@@ -3,7 +3,7 @@ use iced::{
 };
 use iced::widget::Image;
 mod engine;
-use engine::{Board, Color, PieceType, best_move_for_color,improved_best_move_for_color, opposite_color};
+use engine::{Board, Color, PieceType,improved_best_move_for_color, opposite_color};
 
 #[derive(Debug, Clone, Copy)]
 enum GameResult {
