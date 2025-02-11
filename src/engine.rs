@@ -1,6 +1,6 @@
 // engine.rs
-use std::cmp::Reverse;
-use std::collections::HashMap;
+// use std::cmp::Reverse;
+// use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Color {
@@ -194,6 +194,13 @@ impl Board {
                                     moves.push(((row, col), (new_row as usize, new_col as usize)));
                                 }
                             }
+                        }
+                    }
+
+                    // En passant
+                    if let Some((target_row, target_col)) = self.en_passant_target {
+                        if new_row == target_row as isize && (col as isize + 1 == target_col as isize || col as isize - 1 == target_col as isize) {
+                            moves.push(((row, col), (new_row as usize, target_col)));
                         }
                     }
                 }
@@ -399,7 +406,7 @@ impl Board {
 
     pub fn is_square_under_attack(&self, row: usize, col: usize, color: Color) -> bool {
         let opponent_color = opposite_color(color);
-        let mut temp_board = self.clone();
+        let temp_board = self.clone();
         // temp_board.squares[row][col] = None;
         // Check all opponent's pieces
         for r in 0..8 {
