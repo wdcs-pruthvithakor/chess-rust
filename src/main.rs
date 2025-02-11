@@ -39,6 +39,9 @@ struct ChessApp {
     difficulty: u32,
     slider_value: f32,
     state: AppState, // Add a state tracker
+    captured_white: Vec<PieceType>,   // Captured white pieces
+    captured_black: Vec<PieceType>,   // Captured black pieces
+    last_move: Option<String>,        // The last move made
 }
 
 impl Default for ChessApp {
@@ -50,6 +53,9 @@ impl Default for ChessApp {
             difficulty: 3, // Adjust for desired bot strength.
             slider_value: 3.0,
             state: AppState::SelectingDifficulty, // Start with difficulty selection
+            captured_white: Vec::new(),   // Captured white pieces
+            captured_black: Vec::new(),   // Captured black pieces
+            last_move: None,        // The last move made
         }
     }
 }
@@ -78,6 +84,19 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                     println!("selected: {} {}", sel_row, sel_col);
                     // Attempt to move from the selected square to the clicked square.
                     if app.board.is_valid_move((sel_row, sel_col), (row, col)) {
+                        app.last_move = Some(format!("White moved {} from ({}, {}) to ({}, {})",
+                            app.board.squares[sel_row][sel_col].unwrap().kind.get_name(),
+                            sel_row, sel_col, row, col
+                        ));
+                        if let Some(piece) = app.board.squares[row][col] {
+                            if piece.color == Color::Black {
+                                app.captured_white.push(piece.kind); // Add to captured white 
+                                app.last_move = Some(format!("White moved {} from ({}, {}) to ({}, {}) and captured {}.",
+                                    app.board.squares[sel_row][sel_col].unwrap().kind.get_name(),
+                                    sel_row, sel_col, row, col, piece.kind.get_name()
+                                ));
+                            }
+                        }
                         app.board.apply_move(((sel_row, sel_col), (row, col)));
                         app.selected = None;
                         app.current_turn = opposite_color(app.current_turn);
@@ -113,6 +132,20 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                     return Task::perform(async { () }, move |_| Message::EndGame(winner));
                 }
                 if let Some(mv) = improved_best_move_for_color(&app.board, Color::Black, app.difficulty) {
+                    app.last_move = Some(format!("Black moved {} from ({}, {}) to ({}, {})", 
+                        app.board.squares[mv.0.0][mv.0.1].unwrap().kind.get_name(),
+                        mv.0.0, mv.0.1, mv.1.0, mv.1.1)
+                    );
+                    // Check for capture
+                    if let Some(piece) = app.board.squares[mv.1 .0][mv.1 .1] {
+                        if piece.color == Color::White {
+                            app.captured_black.push(piece.kind); // Add to captured black pieces
+                            app.last_move = Some(format!("Black moved {} from ({}, {}) to ({}, {}) and captured {}.", 
+                                app.board.squares[mv.0.0][mv.0.1].unwrap().kind.get_name(),
+                                mv.0.0, mv.0.1, mv.1.0, mv.1.1, piece.kind.get_name()
+                            ));
+                        }
+                    }
                     app.board.apply_move(mv);
                     app.current_turn = opposite_color(app.current_turn);
                     if app.board.is_checkmate(app.current_turn){
@@ -142,7 +175,7 @@ fn view(app: &ChessApp) -> Element<Message> {
            Column::new()
                .push(Text::new("Select Difficulty"))
                .push(
-                   slider(2.0..=9.0, app.slider_value, Message::SliderChanged)
+                   slider(1.0..=7.0, app.slider_value, Message::SliderChanged)
                        .step(1.0) // Step makes it snap to whole numbers
                )
                .push(Text::new(format!("Difficulty: {}", app.slider_value.round() as u32)))
@@ -211,25 +244,95 @@ fn view(app: &ChessApp) -> Element<Message> {
                board_view = board_view.push(row_view); // Reassign board_view
            }
            
-           board_view.into() // Convert the final Column to an Element
+            //    board_view.into() // Convert the final Column to an Element
 
-       }
-       AppState::GameOver(result) => {
-           let result_text = match result {
-               GameResult::Winner(color) => format!("{:?} Wins!", color),
-               GameResult::Draw => "It's a Draw!".to_string(),
-           };
+            // Create a section to show captured pieces
+            let captured_white_view: Column<'_, Message> = Column::new()
+                .push(Text::new("Captured White Pieces"))
+                .push(
+                    Row::new()
+                        .spacing(10)
+                        .push(
+                            // Iterate over the captured white pieces and push each one as an Element.
+                            app.captured_white.iter().fold(Row::new().spacing(10), |row, piece| {
+                                let asset = match piece {
+                                    PieceType::Pawn => "assets/white_pawn.jpeg",
+                                    PieceType::King => "assets/white_king.jpeg",
+                                    PieceType::Queen => "assets/white_queen.jpeg",
+                                    PieceType::Rook => "assets/white_rook.png",
+                                    PieceType::Knight => "assets/white_knight.jpeg",
+                                    PieceType::Bishop => "assets/white_bishop.jpeg",
+                                };
+                                let handle = image::Handle::from_path(asset);
+                                let image: iced::widget::Image<iced::widget::image::Handle> = Image::new(handle)
+                                    .width(Length::Fixed(40.0))
+                                    .height(Length::Fixed(40.0));
 
-           Column::new()
-               .push(Text::new("Game Over"))
-               .push(Text::new(result_text))
-               .push(
-                   Button::new(Text::new("Play Again"))
-                       .on_press(Message::Restart) // Restart game
-               )
-               .padding(20)
-               .spacing(10)
-               .into()
+
+                                // Push the image to the row
+                                row.push(image)
+                            })
+                        )
+                );
+
+
+                let captured_black_view: Column<'_, Message> = Column::new()
+                .push(Text::new("Captured Black Pieces"))
+                .push(
+                    Row::new()
+                        .spacing(10)
+                        .push(
+                            // Iterate over the captured pieces and push each one as an Element.
+                            app.captured_black.iter().fold(Row::new().spacing(10), |row, piece| {
+                                let asset = match piece {
+                                    PieceType::Pawn => "assets/black_pawn.png",
+                                    PieceType::King => "assets/black_king.png",
+                                    PieceType::Queen => "assets/black_queen.jpeg",
+                                    PieceType::Rook => "assets/black_rook.png",
+                                    PieceType::Knight => "assets/black_knight.jpeg",
+                                    PieceType::Bishop => "assets/black_bishop.png",
+                                };
+                                let handle = image::Handle::from_path(asset);
+                                let image: iced::widget::Image<iced::widget::image::Handle> = Image::new(handle)
+                                    .width(Length::Fixed(40.0))
+                                    .height(Length::Fixed(40.0));
+
+                                // Push the image to the row
+                                row.push(image)
+                            })
+                        )
+                );
+
+            // Display the last move
+            let last_move_view = Column::new()
+                .push(Text::new("Last Move"))
+                .push(Text::new(app.last_move.clone().unwrap_or_else(|| "No move yet".to_string())));
+
+            // Combine everything
+            Column::new()
+                .push(board_view)
+                .push(captured_white_view)
+                .push(captured_black_view)
+                .push(last_move_view)
+                .into()
+
+        }
+        AppState::GameOver(result) => {
+            let result_text = match result {
+                GameResult::Winner(color) => format!("{:?} Wins!", color),
+                GameResult::Draw => "It's a Draw!".to_string(),
+            };
+
+        Column::new()
+            .push(Text::new("Game Over"))
+            .push(Text::new(result_text))
+            .push(
+                Button::new(Text::new("Play Again"))
+                    .on_press(Message::Restart) // Restart game
+            )
+            .padding(20)
+            .spacing(10)
+            .into()
        }
    }
 }

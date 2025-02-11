@@ -18,6 +18,19 @@ pub enum PieceType {
     Pawn,
 }
 
+impl PieceType {
+    pub fn get_name(&self) -> &str {
+        match *self {
+            PieceType::King => "King",
+            PieceType::Queen => "Queen",
+            PieceType::Rook => "Rook",
+            PieceType::Knight => "Knight",
+            PieceType::Bishop => "Bishop",
+            PieceType::Pawn => "Pawn",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Piece {
     pub color: Color,
