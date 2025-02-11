@@ -1,6 +1,6 @@
 // engine.rs
-use std::collections::HashMap;
 use std::cmp::Reverse;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Color {
@@ -39,13 +39,13 @@ pub struct Piece {
 
 pub const EMPTY: Option<Piece> = None;
 
-
 #[derive(Clone, Debug)]
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
     pub half_move_clock: u32, // Tracks moves since last pawn move or capture
     pub white_castle_possible: bool,
     pub black_castle_possible: bool,
+    pub en_passant_target: Option<(usize, usize)>,
 }
 
 impl Board {
@@ -55,6 +55,7 @@ impl Board {
             half_move_clock: 0,
             white_castle_possible: true,
             black_castle_possible: true,
+            en_passant_target: None,
         };
 
         // Initialize board with pieces (only a few for brevity)
@@ -162,27 +163,33 @@ impl Board {
                         Color::Black => -1, // Black moves down (toward row 0)
                     };
                     let new_row = row as isize + direction;
-                    
+
                     // Simple forward move (1 square ahead)
-                    if new_row >= 0 && new_row < 8 && self.squares[new_row as usize][col].is_none() {
+                    if new_row >= 0 && new_row < 8 && self.squares[new_row as usize][col].is_none()
+                    {
                         moves.push(((row, col), (new_row as usize, col)));
                     }
 
                     // Double forward move (only allowed on the starting row and if both squares are empty)
                     let starting_row = if piece.color == Color::White { 1 } else { 6 };
                     if row == starting_row && self.squares[new_row as usize][col].is_none() {
-                        let double_row = new_row + direction;  // Calculate the row 2 squares ahead
-                        if double_row >= 0 && double_row < 8 && self.squares[double_row as usize][col].is_none() {
+                        let double_row = new_row + direction; // Calculate the row 2 squares ahead
+                        if double_row >= 0
+                            && double_row < 8
+                            && self.squares[double_row as usize][col].is_none()
+                        {
                             // Check that the square two steps ahead is empty
                             moves.push(((row, col), (double_row as usize, col)));
                         }
                     }
-                
+
                     // Diagonal captures (both left and right)
                     for &dc in &[-1, 1] {
                         let new_col = col as isize + dc;
                         if new_row >= 0 && new_row < 8 && new_col >= 0 && new_col < 8 {
-                            if let Some(dest_piece) = self.squares[new_row as usize][new_col as usize] {
+                            if let Some(dest_piece) =
+                                self.squares[new_row as usize][new_col as usize]
+                            {
                                 if dest_piece.color != piece.color {
                                     moves.push(((row, col), (new_row as usize, new_col as usize)));
                                 }
@@ -218,21 +225,25 @@ impl Board {
                             }
                         }
                     }
-                     // Castling logic
+                    // Castling logic
                     if let Some(piece) = self.squares[row][col] {
                         if piece.color == Color::White && self.white_castle_possible {
-                            if self.can_castle((row, col), (row, 6)) { // Kingside castling
+                            if self.can_castle((row, col), (row, 6)) {
+                                // Kingside castling
                                 moves.push(((row, col), (row, 6)));
                             }
-                            if self.can_castle((row, col), (row, 2)) { // Queenside castling
+                            if self.can_castle((row, col), (row, 2)) {
+                                // Queenside castling
                                 moves.push(((row, col), (row, 2)));
                             }
                         }
                         if piece.color == Color::Black && self.black_castle_possible {
-                            if self.can_castle((row, col), (row, 6)) { // Kingside castling
+                            if self.can_castle((row, col), (row, 6)) {
+                                // Kingside castling
                                 moves.push(((row, col), (row, 6)));
                             }
-                            if self.can_castle((row, col), (row, 2)) { // Queenside castling
+                            if self.can_castle((row, col), (row, 2)) {
+                                // Queenside castling
                                 moves.push(((row, col), (row, 2)));
                             }
                         }
@@ -260,20 +271,18 @@ impl Board {
                                 if dest_piece.color != piece.color {
                                     // Check if the destination is under attack
                                     // if !self.is_square_under_attack(new_row as usize, new_col as usize, piece.color) {
-                                        moves.push(((row, col), (new_row as usize, new_col as usize)));
+                                    moves.push(((row, col), (new_row as usize, new_col as usize)));
                                     // }
                                 }
                             } else {
                                 // Check if the destination is under attack
                                 // if !self.is_square_under_attack(new_row as usize, new_col as usize, piece.color) {
-                                    moves.push(((row, col), (new_row as usize, new_col as usize)));
+                                moves.push(((row, col), (new_row as usize, new_col as usize)));
                                 // }
                             }
                         }
                     }
-                
-
-                }                
+                }
                 PieceType::Queen => {
                     // Queen moves are a combination of Rook and Bishop moves
                     moves.extend(self.generate_moves_in_direction(row, col, 1, 0, piece)); // Right
@@ -300,7 +309,6 @@ impl Board {
                     moves.extend(self.generate_moves_in_direction(row, col, -1, -1, piece));
                     // Up-Left
                 }
-
             }
         }
         moves
@@ -360,6 +368,10 @@ impl Board {
 
             // Update half-move clock on captures or pawn moves
             if piece.kind == PieceType::Pawn || self.squares[to_row][to_col].is_some() {
+                // En passant capture
+                if Some((to_row, to_col)) == self.en_passant_target {
+                    self.squares[from_row][to_col] = None; // Remove captured pawn
+                }
                 self.half_move_clock = 0; // Reset clock on pawn move or capture
             } else {
                 self.half_move_clock += 1;
@@ -369,8 +381,21 @@ impl Board {
                 piece.kind = PieceType::Queen;
             }
             self.squares[to_row][to_col] = Some(piece);
+            // Update en passant target square
+            self.en_passant_target = None; // Reset on every move
+            if piece.kind == PieceType::Pawn {
+                let row_diff = if to_row > from_row {
+                    to_row - from_row
+                } else {
+                    from_row - to_row
+                };
+
+                if row_diff == 2 {
+                    self.en_passant_target = Some(((from_row + to_row) / 2, from_col));
+                }
+            }
         }
-    }    
+    }
 
     pub fn is_square_under_attack(&self, row: usize, col: usize, color: Color) -> bool {
         let opponent_color = opposite_color(color);
@@ -403,16 +428,28 @@ impl Board {
 
         // Ensure it's a king moving two squares
         if (from_col == 4) && (to_col == 6 || to_col == 2) && (from_row == to_row) {
-            let color = if from_row == 0 { Color::White } else { Color::Black };
+            let color = if from_row == 0 {
+                Color::White
+            } else {
+                Color::Black
+            };
             let kingside = to_col == 6;
             let rook_col = if kingside { 7 } else { 0 };
 
             // Castling flag check
-            if color == Color::White && !self.white_castle_possible { return false; }
-            if color == Color::Black && !self.black_castle_possible { return false; }
+            if color == Color::White && !self.white_castle_possible {
+                return false;
+            }
+            if color == Color::Black && !self.black_castle_possible {
+                return false;
+            }
 
             // Ensure King and Rook are in their original positions
-            if let Some(Piece { kind: PieceType::King, color: king_color }) = self.squares[from_row][from_col] {
+            if let Some(Piece {
+                kind: PieceType::King,
+                color: king_color,
+            }) = self.squares[from_row][from_col]
+            {
                 if king_color != color {
                     return false;
                 }
@@ -420,7 +457,11 @@ impl Board {
                 return false; // King must be present
             }
 
-            if let Some(Piece { kind: PieceType::Rook, color: rook_color }) = self.squares[from_row][rook_col] {
+            if let Some(Piece {
+                kind: PieceType::Rook,
+                color: rook_color,
+            }) = self.squares[from_row][rook_col]
+            {
                 if rook_color != color {
                     return false;
                 }
@@ -435,9 +476,13 @@ impl Board {
             }
 
             // Ensure the King is not in check, moving through check, or landing in check
-            if self.is_in_check(color) { return false; }
+            if self.is_in_check(color) {
+                return false;
+            }
             for col in range {
-                if self.is_square_under_attack(from_row, col, color) { return false; }
+                if self.is_square_under_attack(from_row, col, color) {
+                    return false;
+                }
             }
 
             // Passed all checks, castling is valid
@@ -461,7 +506,7 @@ impl Board {
 
         // Move the King
         self.squares[row][to_col] = self.squares[row][from_col].take();
-        
+
         // Move the Rook
         self.squares[row][new_rook_col] = self.squares[row][rook_col].take();
 
@@ -492,10 +537,10 @@ impl Board {
         if !self.is_in_check(color) {
             return false; // Not in check, can't be checkmate
         }
-    
+
         let king_pos = self.find_king(color).unwrap();
         let king_moves = self.generate_moves_for_piece(king_pos.0, king_pos.1);
-    
+
         // 1. King escape:
         for (_, to) in king_moves {
             let mut temp_board = self.clone();
@@ -504,12 +549,15 @@ impl Board {
                 return false; // King can escape
             }
         }
-    
+
         // 2. Block/capture:
         // let checking_pieces = self.pieces_causing_check(color); // Helper function (see previous response)
-        let moves: Vec<_> = self.generate_all_moves(color).into_iter().filter(|m| self.is_valid_move(m.0,m.1)).collect();
+        let moves: Vec<_> = self
+            .generate_all_moves(color)
+            .into_iter()
+            .filter(|m| self.is_valid_move(m.0, m.1))
+            .collect();
         moves.is_empty()
-
     }
 
     pub fn is_draw(&self, color: Color) -> bool {
@@ -520,7 +568,11 @@ impl Board {
         if self.is_in_check(color) {
             return false;
         }
-        let moves: Vec<_> = self.generate_all_moves(color).into_iter().filter(|m| self.is_valid_move(m.0,m.1)).collect();
+        let moves: Vec<_> = self
+            .generate_all_moves(color)
+            .into_iter()
+            .filter(|m| self.is_valid_move(m.0, m.1))
+            .collect();
         moves.is_empty()
     }
 
@@ -529,7 +581,7 @@ impl Board {
         let mut black_major_material = 0;
         let mut white_minor_material = 0;
         let mut black_minor_material = 0;
-    
+
         for row in 0..8 {
             for col in 0..8 {
                 if let Some(piece) = &self.squares[row][col] {
@@ -553,31 +605,31 @@ impl Board {
                 }
             }
         }
-    
+
         // If either side has a Pawn, Rook, or Queen, checkmate is possible
         if white_major_material > 0 || black_major_material > 0 {
             return true;
         }
-    
+
         // Special case: If both sides have only a King, it's a draw
         if white_minor_material == 0 && black_minor_material == 0 {
             return false;
         }
-    
+
         // Special case: A single knight or bishop cannot force checkmate alone
         if (white_minor_material == 1 && black_major_material == 0 && black_minor_material == 0)
             || (black_minor_material == 1 && white_major_material == 0 && white_minor_material == 0)
         {
             return false;
         }
-    
+
         // If both sides have minor pieces but no major pieces, it's a draw unless there are at least two bishops
         if white_major_material == 0 && black_major_material == 0 {
             if white_minor_material <= 1 && black_minor_material <= 1 {
                 return false;
             }
         }
-    
+
         // If no early draw conditions matched, checkmate is still possible
         true
     }
@@ -637,9 +689,7 @@ impl Board {
 
         true
     }
-    
 }
-
 
 pub fn opposite_color(color: Color) -> Color {
     match color {
@@ -674,7 +724,11 @@ pub fn improved_best_move_for_color(
                     if (2..=5).contains(&row) && (2..=5).contains(&col) {
                         piece_score += 10;
                     }
-                    score += if piece.color == Color::White { piece_score } else { -piece_score };
+                    score += if piece.color == Color::White {
+                        piece_score
+                    } else {
+                        -piece_score
+                    };
                 }
             }
         }
@@ -771,7 +825,11 @@ pub fn improved_best_move_for_color(
 
     // Main search logic with threading
     let mut best_move = None;
-    let mut best_value = if color == Color::White { i32::MIN } else { i32::MAX };
+    let mut best_value = if color == Color::White {
+        i32::MIN
+    } else {
+        i32::MAX
+    };
     let mut moves = board.generate_all_moves(color);
 
     // Sort moves to improve pruning
