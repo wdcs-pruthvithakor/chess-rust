@@ -44,8 +44,8 @@ pub const EMPTY: Option<Piece> = None;
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
     pub half_move_clock: u32, // Tracks moves since last pawn move or capture
-    // pub white_castle_possible: bool,
-    // pub black_castle_possible: bool,
+    pub white_castle_possible: bool,
+    pub black_castle_possible: bool,
 }
 
 impl Board {
@@ -53,8 +53,8 @@ impl Board {
         let mut board = Board {
             squares: [[EMPTY; 8]; 8],
             half_move_clock: 0,
-            // white_castle_possible: true,
-            // black_castle_possible: true,
+            white_castle_possible: true,
+            black_castle_possible: true,
         };
 
         // Initialize board with pieces (only a few for brevity)
@@ -218,6 +218,25 @@ impl Board {
                             }
                         }
                     }
+                     // Castling logic
+                    if let Some(piece) = self.squares[row][col] {
+                        if piece.color == Color::White && self.white_castle_possible {
+                            if self.can_castle((row, col), (row, 6)) { // Kingside castling
+                                moves.push(((row, col), (row, 6)));
+                            }
+                            if self.can_castle((row, col), (row, 2)) { // Queenside castling
+                                moves.push(((row, col), (row, 2)));
+                            }
+                        }
+                        if piece.color == Color::Black && self.black_castle_possible {
+                            if self.can_castle((row, col), (row, 6)) { // Kingside castling
+                                moves.push(((row, col), (row, 6)));
+                            }
+                            if self.can_castle((row, col), (row, 2)) { // Queenside castling
+                                moves.push(((row, col), (row, 2)));
+                            }
+                        }
+                    }
                 }
                 PieceType::King => {
                     let king_moves = [
@@ -332,10 +351,10 @@ impl Board {
 
     pub fn apply_move(&mut self, m: ((usize, usize), (usize, usize))) {
         let ((from_row, from_col), (to_row, to_col)) = m;
-        // if self.can_castle((from_row, from_col), (to_row, to_col)) {
-        //     self.castle((from_row, from_col), (to_row, to_col));
-        //     return;
-        // }
+        if self.can_castle((from_row, from_col), (to_row, to_col)) {
+            self.castle((from_row, from_col), (to_row, to_col));
+            return;
+        }
         if let Some(mut piece) = self.squares[from_row][from_col] {
             self.squares[from_row][from_col] = EMPTY;
 
@@ -378,83 +397,83 @@ impl Board {
     }
 
     // Check if the given move (from -> to) is a valid castling move
-    // pub fn can_castle(&self, from: (usize, usize), to: (usize, usize)) -> bool {
-    //     let (from_row, from_col) = from;
-    //     let (to_row, to_col) = to;
+    pub fn can_castle(&self, from: (usize, usize), to: (usize, usize)) -> bool {
+        let (from_row, from_col) = from;
+        let (to_row, to_col) = to;
 
-    //     // Ensure it's a king moving two squares
-    //     if (from_col == 4) && (to_col == 6 || to_col == 2) && (from_row == to_row) {
-    //         let color = if from_row == 0 { Color::White } else { Color::Black };
-    //         let kingside = to_col == 6;
-    //         let rook_col = if kingside { 7 } else { 0 };
+        // Ensure it's a king moving two squares
+        if (from_col == 4) && (to_col == 6 || to_col == 2) && (from_row == to_row) {
+            let color = if from_row == 0 { Color::White } else { Color::Black };
+            let kingside = to_col == 6;
+            let rook_col = if kingside { 7 } else { 0 };
 
-    //         // Castling flag check
-    //         if color == Color::White && !self.white_castle_possible { return false; }
-    //         if color == Color::Black && !self.black_castle_possible { return false; }
+            // Castling flag check
+            if color == Color::White && !self.white_castle_possible { return false; }
+            if color == Color::Black && !self.black_castle_possible { return false; }
 
-    //         // Ensure King and Rook are in their original positions
-    //         if let Some(Piece { kind: PieceType::King, color: king_color }) = self.squares[from_row][from_col] {
-    //             if king_color != color {
-    //                 return false;
-    //             }
-    //         } else {
-    //             return false; // King must be present
-    //         }
+            // Ensure King and Rook are in their original positions
+            if let Some(Piece { kind: PieceType::King, color: king_color }) = self.squares[from_row][from_col] {
+                if king_color != color {
+                    return false;
+                }
+            } else {
+                return false; // King must be present
+            }
 
-    //         if let Some(Piece { kind: PieceType::Rook, color: rook_color }) = self.squares[from_row][rook_col] {
-    //             if rook_color != color {
-    //                 return false;
-    //             }
-    //         } else {
-    //             return false; // Rook must be present
-    //         }
+            if let Some(Piece { kind: PieceType::Rook, color: rook_color }) = self.squares[from_row][rook_col] {
+                if rook_color != color {
+                    return false;
+                }
+            } else {
+                return false; // Rook must be present
+            }
 
-    //         // Ensure the squares between the King and Rook are empty
-    //         let range = if kingside { 5..7 } else { 1..4 };
-    //         if range.clone().any(|c| self.squares[from_row][c].is_some()) {
-    //             return false; // Path must be clear
-    //         }
+            // Ensure the squares between the King and Rook are empty
+            let range = if kingside { 5..7 } else { 1..4 };
+            if range.clone().any(|c| self.squares[from_row][c].is_some()) {
+                return false; // Path must be clear
+            }
 
-    //         // Ensure the King is not in check, moving through check, or landing in check
-    //         if self.is_in_check(color) { return false; }
-    //         for col in range {
-    //             if self.is_square_under_attack(from_row, col, color) { return false; }
-    //         }
+            // Ensure the King is not in check, moving through check, or landing in check
+            if self.is_in_check(color) { return false; }
+            for col in range {
+                if self.is_square_under_attack(from_row, col, color) { return false; }
+            }
 
-    //         // Passed all checks, castling is valid
-    //         return true;
-    //     }
+            // Passed all checks, castling is valid
+            return true;
+        }
 
-    //     false // Not a valid castling move
-    // }
+        false // Not a valid castling move
+    }
 
-    // // Execute the castling move if valid
-    // pub fn castle(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
-    //     if !self.can_castle(from, to) {
-    //         return false;
-    //     }
+    // Execute the castling move if valid
+    pub fn castle(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
+        if !self.can_castle(from, to) {
+            return false;
+        }
 
-    //     let (row, from_col) = from;
-    //     let to_col = to.1;
-    //     let kingside = to_col == 6;
-    //     let rook_col = if kingside { 7 } else { 0 };
-    //     let new_rook_col = if kingside { 5 } else { 3 };
+        let (row, from_col) = from;
+        let to_col = to.1;
+        let kingside = to_col == 6;
+        let rook_col = if kingside { 7 } else { 0 };
+        let new_rook_col = if kingside { 5 } else { 3 };
 
-    //     // Move the King
-    //     self.squares[row][to_col] = self.squares[row][from_col].take();
+        // Move the King
+        self.squares[row][to_col] = self.squares[row][from_col].take();
         
-    //     // Move the Rook
-    //     self.squares[row][new_rook_col] = self.squares[row][rook_col].take();
+        // Move the Rook
+        self.squares[row][new_rook_col] = self.squares[row][rook_col].take();
 
-    //     // Disable further castling for this player
-    //     if row == 0 {
-    //         self.white_castle_possible = false;
-    //     } else {
-    //         self.black_castle_possible = false;
-    //     }
+        // Disable further castling for this player
+        if row == 0 {
+            self.white_castle_possible = false;
+        } else {
+            self.black_castle_possible = false;
+        }
 
-    //     true
-    // }
+        true
+    }
 
     pub fn find_king(&self, color: Color) -> Option<(usize, usize)> {
         for row in 0..8 {
@@ -590,9 +609,9 @@ impl Board {
         };
 
         // // Check if it is castle move
-        // if self.can_castle(from, to) {
-        //     return true;
-        // }
+        if self.can_castle(from, to) {
+            return true;
+        }
 
         // Ensure the piece is not capturing its own color
         if let Some(target_piece) = self.squares[to.0][to.1] {
