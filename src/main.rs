@@ -90,7 +90,7 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                         ));
                         if let Some(piece) = app.board.squares[row][col] {
                             if piece.color == Color::Black {
-                                app.captured_white.push(piece.kind); // Add to captured white 
+                                app.captured_black.push(piece.kind); // Add to captured white 
                                 app.last_move = Some(format!("White moved {} from ({}, {}) to ({}, {}) and captured {}.",
                                     app.board.squares[sel_row][sel_col].unwrap().kind.get_name(),
                                     sel_row, sel_col, row, col, piece.kind.get_name()
@@ -139,7 +139,7 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message>  {
                     // Check for capture
                     if let Some(piece) = app.board.squares[mv.1 .0][mv.1 .1] {
                         if piece.color == Color::White {
-                            app.captured_black.push(piece.kind); // Add to captured black pieces
+                            app.captured_white.push(piece.kind); // Add to captured black pieces
                             app.last_move = Some(format!("Black moved {} from ({}, {}) to ({}, {}) and captured {}.", 
                                 app.board.squares[mv.0.0][mv.0.1].unwrap().kind.get_name(),
                                 mv.0.0, mv.0.1, mv.1.0, mv.1.1, piece.kind.get_name()
