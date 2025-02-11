@@ -340,6 +340,10 @@ fn view(app: &ChessApp) -> Element<Message> {
                     .clone()
                     .unwrap_or_else(|| "No move yet".to_string()),
             ));
+            let controls = Row::new()
+                .push(Button::new(Text::new("Restart")).on_press(Message::Restart))
+                .padding(10)
+                .spacing(10); // Add spacing around the button
 
             // Combine everything
             Column::new()
@@ -347,6 +351,7 @@ fn view(app: &ChessApp) -> Element<Message> {
                 .push(captured_white_view)
                 .push(captured_black_view)
                 .push(last_move_view)
+                .push(controls)
                 .into()
         }
         AppState::GameOver(result) => {
