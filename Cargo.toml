@@ -8,3 +8,4 @@ iced = { version = "0.13", features = ["image"] } # Check for the latest version
 iced_lazy = "0.6"
 tokio = { version = "1", features = ["full"] } # Check for the latest version on
 rand = "0.9.0"
+rayon = "1.10"

@@ -499,6 +499,7 @@ dependencies = [
  "iced",
  "iced_lazy",
  "rand 0.9.0",
+ "rayon",
  "tokio",
 ]
 

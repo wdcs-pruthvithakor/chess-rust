@@ -704,9 +704,9 @@ pub fn opposite_color(color: Color) -> Color {
         Color::Black => Color::White,
     }
 }
-use std::thread;
+// use std::thread;
 use std::sync::{Arc, Mutex};
-use std::cmp::Ordering;
+use rayon::prelude::*; // Rayon is a Rust crate that helps with parallel computation
 
 pub fn improved_best_move_for_color(
     board: &Board,
@@ -769,7 +769,6 @@ pub fn improved_best_move_for_color(
         }
 
         let mut moves = board.generate_all_moves(color);
-        // Sort moves to improve pruning
         moves.sort_by_key(|m| -score_move(board, m));
 
         if maximizing_player {
@@ -833,7 +832,7 @@ pub fn improved_best_move_for_color(
         }
     }
 
-    // Main search logic with thread pool
+    // Main search logic with thread pool (Rayon example)
     let best_move = Arc::new(Mutex::new(None));
     let best_value = Arc::new(Mutex::new(if color == Color::White {
         i32::MIN
@@ -842,10 +841,10 @@ pub fn improved_best_move_for_color(
     }));
 
     let mut moves = board.generate_all_moves(color);
-    // Sort moves to improve pruning
     moves.sort_by_key(|m| -score_move(board, m));
 
-    let handles: Vec<_> = moves.into_iter().map(|m| {
+    // Using Rayon for parallel iteration over moves
+    let _handles: Vec<_> = moves.into_par_iter().map(|m| {
         let best_move = Arc::clone(&best_move);
         let best_value = Arc::clone(&best_value);
         let mut new_board = board.clone();
@@ -853,35 +852,31 @@ pub fn improved_best_move_for_color(
 
         if let Some(king_pos) = new_board.find_king(color) {
             if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                return thread::spawn(move || ());
+                return (); // Skip invalid move
             }
-        } else {
-            return thread::spawn(move || ());
+         } else {
+                return (); // Skip invalid move
         }
 
-        thread::spawn(move || {
-            let eval = alpha_beta(
-                &new_board,
-                depth - 1,
-                i32::MIN + 1,
-                i32::MAX - 1,
-                color == Color::Black,
-                opposite_color(color),
-            );
-            let mut best_value = best_value.lock().unwrap();
-            let mut best_move = best_move.lock().unwrap();
-            if (color == Color::White && eval > *best_value)
-                || (color == Color::Black && eval < *best_value)
-            {
-                *best_value = eval;
-                *best_move = Some(m);
-            }
-        })
+        let eval = alpha_beta(
+            &new_board,
+            depth - 1,
+            i32::MIN + 1,
+            i32::MAX - 1,
+            color == Color::Black,
+            opposite_color(color),
+        );
+
+        let mut best_value = best_value.lock().unwrap();
+        let mut best_move = best_move.lock().unwrap();
+        if (color == Color::White && eval > *best_value)
+            || (color == Color::Black && eval < *best_value)
+        {
+            *best_value = eval;
+            *best_move = Some(m);
+        }
     }).collect();
 
-    for handle in handles {
-        handle.join().unwrap();
-    }
-
+    // Wait for all threads to finish (Rayon handles this internally)
     Arc::try_unwrap(best_move).unwrap().into_inner().unwrap()
 }
