@@ -1,14 +1,15 @@
 // engine.rs
 // use std::cmp::Reverse;
 // use std::collections::HashMap;
+use rand::Rng;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub enum Color {
     White,
     Black,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub enum PieceType {
     King,
     Queen,
@@ -704,15 +705,88 @@ pub fn opposite_color(color: Color) -> Color {
         Color::Black => Color::White,
     }
 }
+
 // use std::thread;
 use std::sync::{Arc, Mutex};
-use rayon::prelude::*; // Rayon is a Rust crate that helps with parallel computation
+use rayon::prelude::*;
+use std::collections::HashMap;
+
+
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+pub struct PositionKey(u64); // 64-bit key for the board
+
+// Zobrist Hashing Table
+pub struct ZobristHasher {
+    keys: HashMap<(PieceType, Color, usize, usize), u64>, // Maps each piece on each square to a unique hash
+}
+
+impl ZobristHasher {
+    pub fn new() -> Self {
+        let mut rng = rand::thread_rng();
+        let mut keys = HashMap::new();
+
+        // Generate a random hash for each piece type and each square
+        for piece_type in &[PieceType::Pawn, PieceType::Knight, PieceType::Bishop, PieceType::Rook, PieceType::Queen, PieceType::King] {
+            for color in &[Color::White, Color::Black] {
+                for row in 0..8 {
+                    for col in 0..8 {
+                        let random_key: u64 = rng.gen();
+                        keys.insert((*piece_type, *color, row, col), random_key);
+                    }
+                }
+            }
+        }
+
+        ZobristHasher { keys }
+    }
+
+    pub fn get_key_for_position(&self, piece: &Piece, row: usize, col: usize) -> u64 {
+        *self.keys.get(&(piece.kind, piece.color, row, col)).unwrap()
+    }
+
+    // Generate the hash for the entire board
+    pub fn compute_board_hash(&self, board: &Board) -> PositionKey {
+        let mut hash = 0u64;
+
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = &board.squares[row][col] {
+                    let piece_hash = self.get_key_for_position(piece, row, col);
+                    hash ^= piece_hash; // XOR the piece's hash with the current total hash
+                }
+            }
+        }
+
+        PositionKey(hash)
+    }
+}
+
+pub struct TranspositionTable {
+    table: HashMap<PositionKey, i32>,
+}
+
+impl TranspositionTable {
+    pub fn new() -> Self {
+        TranspositionTable {
+            table: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, key: &PositionKey) -> Option<&i32> {
+        self.table.get(key)
+    }
+
+    pub fn insert(&mut self, key: PositionKey, value: i32) {
+        self.table.insert(key, value);
+    }
+}
 
 pub fn improved_best_move_for_color(
     board: &Board,
     color: Color,
     depth: u32,
 ) -> Option<((usize, usize), (usize, usize))> {
+
     fn get_piece_value(piece: &Piece) -> i32 {
         match piece.kind {
             PieceType::Pawn => 100,
@@ -723,16 +797,156 @@ pub fn improved_best_move_for_color(
             PieceType::King => 20000,
         }
     }
-
+    
+    // Piece-Square Tables for positional evaluation
+    const PAWN_TABLE: [[i32; 8]; 8] = [
+        [0,  0,  0,  0,  0,  0,  0,  0],
+        [50, 50, 50, 50, 50, 50, 50, 50],
+        [10, 10, 20, 30, 30, 20, 10, 10],
+        [5,  5, 10, 25, 25, 10,  5,  5],
+        [0,  0,  0, 20, 20,  0,  0,  0],
+        [5, -5,-10,  0,  0,-10, -5,  5],
+        [5, 10, 10,-20,-20, 10, 10,  5],
+        [0,  0,  0,  0,  0,  0,  0,  0]
+    ];
+    
+    const KNIGHT_TABLE: [[i32; 8]; 8] = [
+        [-50,-40,-30,-30,-30,-30,-40,-50],
+        [-40,-20,  0,  0,  0,  0,-20,-40],
+        [-30,  0, 10, 15, 15, 10,  0,-30],
+        [-30,  5, 15, 20, 20, 15,  5,-30],
+        [-30,  0, 15, 20, 20, 15,  0,-30],
+        [-30,  5, 10, 15, 15, 10,  5,-30],
+        [-40,-20,  0,  5,  5,  0,-20,-40],
+        [-50,-40,-30,-30,-30,-30,-40,-50]
+    ];
+    
+    const BISHOP_TABLE: [[i32; 8]; 8] = [
+        [-20,-10,-10,-10,-10,-10,-10,-20],
+        [-10,  0,  0,  0,  0,  0,  0,-10],
+        [-10,  0,  5, 10, 10,  5,  0,-10],
+        [-10,  5,  5, 10, 10,  5,  5,-10],
+        [-10,  0, 10, 10, 10, 10,  0,-10],
+        [-10, 10, 10, 10, 10, 10, 10,-10],
+        [-10,  5,  0,  0,  0,  0,  5,-10],
+        [-20,-10,-10,-10,-10,-10,-10,-20]
+    ];
+    
     fn evaluate_position(board: &Board) -> i32 {
         let mut score = 0;
+        let mut white_pawns_per_file = [0; 8];
+        let mut black_pawns_per_file = [0; 8];
+        let mut white_bishops = 0;
+        let mut black_bishops = 0;
+    
+        // First pass: collect piece statistics
         for row in 0..8 {
             for col in 0..8 {
-                if let Some(piece) = board.squares[row][col] {
-                    let mut piece_score = get_piece_value(&piece);
-                    if (2..=5).contains(&row) && (2..=5).contains(&col) {
-                        piece_score += 10;
+                if let Some(piece) = &board.squares[row][col] {
+                    match piece.kind {
+                        PieceType::Pawn => {
+                            if piece.color == Color::White {
+                                white_pawns_per_file[col] += 1;
+                            } else {
+                                black_pawns_per_file[col] += 1;
+                            }
+                        }
+                        PieceType::Bishop => {
+                            if piece.color == Color::White {
+                                white_bishops += 1;
+                            } else {
+                                black_bishops += 1;
+                            }
+                        }
+                        _ => {}
                     }
+                }
+            }
+        }
+    
+        // Second pass: evaluate pieces and positions
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = &board.squares[row][col] {
+                    let mut piece_score = get_piece_value(piece);
+                    
+                    // Apply piece-square table bonuses
+                    let position_bonus = match piece.kind {
+                        PieceType::Pawn => PAWN_TABLE[row][col],
+                        PieceType::Knight => KNIGHT_TABLE[row][col],
+                        PieceType::Bishop => BISHOP_TABLE[row][col],
+                        _ => 0,
+                    };
+    
+                    // Apply color-specific adjustments
+                    let (pos_row, pos_bonus) = if piece.color == Color::White {
+                        (row, position_bonus)
+                    } else {
+                        (7 - row, -position_bonus)
+                    };
+    
+                    piece_score += pos_bonus;
+    
+                    // Pawn structure evaluation
+                    if piece.kind == PieceType::Pawn {
+                        // Doubled pawns penalty
+                        let pawns_in_file = if piece.color == Color::White {
+                            white_pawns_per_file[col]
+                        } else {
+                            black_pawns_per_file[col]
+                        };
+                        if pawns_in_file > 1 {
+                            piece_score -= 20;
+                        }
+    
+                        // Isolated pawns penalty
+                        let is_isolated = (col == 0 || white_pawns_per_file[col - 1] == 0) &&
+                                        (col == 7 || white_pawns_per_file[col + 1] == 0);
+                        if is_isolated {
+                            piece_score -= 15;
+                        }
+    
+                        // Passed pawn bonus
+                        let is_passed = if piece.color == Color::White {
+                            let mut passed = true;
+                            for r in (0..pos_row).rev() {
+                                if col > 0 && black_pawns_per_file[col - 1] > 0 ||
+                                   black_pawns_per_file[col] > 0 ||
+                                   col < 7 && black_pawns_per_file[col + 1] > 0 {
+                                    passed = false;
+                                    break;
+                                }
+                            }
+                            passed
+                        } else {
+                            let mut passed = true;
+                            for r in (pos_row + 1)..8 {
+                                if col > 0 && white_pawns_per_file[col - 1] > 0 ||
+                                   white_pawns_per_file[col] > 0 ||
+                                   col < 7 && white_pawns_per_file[col + 1] > 0 {
+                                    passed = false;
+                                    break;
+                                }
+                            }
+                            passed
+                        };
+                        if is_passed {
+                            piece_score += 30 + (7 - pos_row as i32) * 5;
+                        }
+                    }
+    
+                    // Bishop pair bonus
+                    if piece.kind == PieceType::Bishop {
+                        if (piece.color == Color::White && white_bishops == 2) ||
+                           (piece.color == Color::Black && black_bishops == 2) {
+                            piece_score += 30;
+                        }
+                    }
+    
+                    // Mobility bonus (simplified)
+                    let moves = board.generate_moves_for_piece(row, col);
+                    piece_score += (moves.len() as i32) * 2;
+    
                     score += if piece.color == Color::White {
                         piece_score
                     } else {
@@ -741,7 +955,67 @@ pub fn improved_best_move_for_color(
                 }
             }
         }
+    
+        // King safety evaluation
+        if let Some((white_king_row, white_king_col)) = board.find_king(Color::White) {
+            score += evaluate_king_safety(board, Color::White, white_king_row, white_king_col);
+        }
+        if let Some((black_king_row, black_king_col)) = board.find_king(Color::Black) {
+            score -= evaluate_king_safety(board, Color::Black, black_king_row, black_king_col);
+        }
+    
         score
+    }
+    
+    fn evaluate_king_safety(board: &Board, color: Color, king_row: usize, king_col: usize) -> i32 {
+        let mut safety_score = 0;
+    
+        // Pawn shield bonus
+        let (pawn_row, direction) = if color == Color::White {
+            (king_row + 1, -1)
+        } else {
+            (king_row - 1, 1)
+        };
+    
+        // Check pawn shield
+        for col in (king_col.saturating_sub(1))..=(king_col + 1).min(7) {
+            if let Some(piece) = &board.squares[pawn_row][col] {
+                if piece.kind == PieceType::Pawn && piece.color == color {
+                    safety_score += 10;
+                }
+            }
+        }
+    
+        // Exposed king penalty
+        let mut attacking_pieces = 0;
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = &board.squares[row][col] {
+                    if piece.color != color {
+                        let moves = board.generate_moves_for_piece(row, col);
+                        for &(_,(to_row, to_col)) in &moves {
+                            if (to_row as i32 - king_row as i32).abs() <= 2 &&
+                               (to_col as i32 - king_col as i32).abs() <= 2 {
+                                attacking_pieces += 1;
+                                safety_score -= match piece.kind {
+                                    PieceType::Queen => 4,
+                                    PieceType::Rook => 2,
+                                    PieceType::Bishop | PieceType::Knight => 1,
+                                    _ => 0,
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    
+        // Heavy penalty for multiple attackers
+        if attacking_pieces > 1 {
+            safety_score -= attacking_pieces * 10;
+        }
+    
+        safety_score
     }
 
     fn score_move(board: &Board, m: &((usize, usize), (usize, usize))) -> i32 {
@@ -756,6 +1030,8 @@ pub fn improved_best_move_for_color(
         score
     }
 
+    let transposition_table = Arc::new(Mutex::new(TranspositionTable::new()));
+    let zobrist_hasher = ZobristHasher::new();
     fn alpha_beta(
         board: &Board,
         depth: u32,
@@ -763,73 +1039,66 @@ pub fn improved_best_move_for_color(
         mut beta: i32,
         maximizing_player: bool,
         color: Color,
+        transposition_table: Arc<Mutex<TranspositionTable>>,
+        zobrist_hasher: &ZobristHasher,
     ) -> i32 {
+        // Compute the Zobrist hash for the current board state
+        let key = zobrist_hasher.compute_board_hash(board);
+    
+        // Check if the position has already been evaluated
+        if let Some(value) = transposition_table.lock().unwrap().get(&key) {
+            return *value; // Return the stored evaluation
+        }
+    
         if depth == 0 {
             return evaluate_position(board);
         }
-
+    
         let mut moves = board.generate_all_moves(color);
         moves.sort_by_key(|m| -score_move(board, m));
-
-        if maximizing_player {
-            let mut max_eval = i32::MIN;
-            for m in moves {
-                let mut new_board = board.clone();
-                new_board.apply_move(m);
-
-                if let Some(king_pos) = new_board.find_king(color) {
-                    if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue;
-                    }
-                } else {
+    
+        let mut best_eval = if maximizing_player { i32::MIN } else { i32::MAX };
+        for m in moves {
+            let mut new_board = board.clone();
+            new_board.apply_move(m);
+    
+            if let Some(king_pos) = new_board.find_king(color) {
+                if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
                     continue;
                 }
-
-                let eval = alpha_beta(
-                    &new_board,
-                    depth - 1,
-                    alpha,
-                    beta,
-                    false,
-                    opposite_color(color),
-                );
-                max_eval = max_eval.max(eval);
-                alpha = alpha.max(eval);
-                if beta <= alpha {
-                    break;
-                }
-            }
-            max_eval
-        } else {
-            let mut min_eval = i32::MAX;
-            for m in moves {
-                let mut new_board = board.clone();
-                new_board.apply_move(m);
-
-                if let Some(king_pos) = new_board.find_king(color) {
-                    if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue;
-                    }
-                } else {
+            } else {
                     continue;
-                }
-
-                let eval = alpha_beta(
-                    &new_board,
-                    depth - 1,
-                    alpha,
-                    beta,
-                    true,
-                    opposite_color(color),
-                );
-                min_eval = min_eval.min(eval);
-                beta = beta.min(eval);
-                if beta <= alpha {
-                    break;
-                }
             }
-            min_eval
+    
+            let eval = alpha_beta(
+                &new_board,
+                depth - 1,
+                alpha,
+                beta,
+                !maximizing_player,
+                opposite_color(color),
+                Arc::clone(&transposition_table),
+                zobrist_hasher,
+            );
+            best_eval = if maximizing_player {
+                best_eval.max(eval)
+            } else {
+                best_eval.min(eval)
+            };
+    
+            if maximizing_player {
+                alpha = alpha.max(best_eval);
+            } else {
+                beta = beta.min(best_eval);
+            }
+    
+            if beta <= alpha {
+                break;
+            }
         }
+    
+        transposition_table.lock().unwrap().insert(key, best_eval); // Store the result in the table
+        best_eval
     }
 
     // Main search logic with thread pool (Rayon example)
@@ -848,6 +1117,7 @@ pub fn improved_best_move_for_color(
         let best_move = Arc::clone(&best_move);
         let best_value = Arc::clone(&best_value);
         let mut new_board = board.clone();
+        let new_transposition_table = transposition_table.clone();
         new_board.apply_move(m);
 
         if let Some(king_pos) = new_board.find_king(color) {
@@ -865,6 +1135,8 @@ pub fn improved_best_move_for_color(
             i32::MAX - 1,
             color == Color::Black,
             opposite_color(color),
+            new_transposition_table,
+            &zobrist_hasher
         );
 
         let mut best_value = best_value.lock().unwrap();
