@@ -1,6 +1,6 @@
 // engine.rs
-// use std::cmp::Reverse;
-// use std::collections::HashMap;
+use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Color {
@@ -199,7 +199,10 @@ impl Board {
 
                     // En passant
                     if let Some((target_row, target_col)) = self.en_passant_target {
-                        if new_row == target_row as isize && (col as isize + 1 == target_col as isize || col as isize - 1 == target_col as isize) {
+                        if new_row == target_row as isize
+                            && (col as isize + 1 == target_col as isize
+                                || col as isize - 1 == target_col as isize)
+                        {
                             moves.push(((row, col), (new_row as usize, target_col)));
                         }
                     }
@@ -704,134 +707,131 @@ pub fn opposite_color(color: Color) -> Color {
         Color::Black => Color::White,
     }
 }
-// use std::thread;
-use std::sync::{Arc, Mutex};
-use rayon::prelude::*; // Rayon is a Rust crate that helps with parallel computation
+
+fn get_piece_value(piece: &Piece) -> i32 {
+    match piece.kind {
+        PieceType::Pawn => 100,
+        PieceType::Knight => 320,
+        PieceType::Bishop => 330,
+        PieceType::Rook => 500,
+        PieceType::Queen => 900,
+        PieceType::King => 20000,
+    }
+}
+
+fn evaluate_position(board: &Board) -> i32 {
+    let mut score = 0;
+    for row in 0..8 {
+        for col in 0..8 {
+            if let Some(piece) = board.squares[row][col] {
+                let mut piece_score = get_piece_value(&piece);
+                if (2..=5).contains(&row) && (2..=5).contains(&col) {
+                    piece_score += 10;
+                }
+                score += if piece.color == Color::White {
+                    piece_score
+                } else {
+                    -piece_score
+                };
+            }
+        }
+    }
+    score
+}
+
+fn score_move(board: &Board, m: &((usize, usize), (usize, usize))) -> i32 {
+    let ((_, _), (to_row, to_col)) = *m;
+    let mut score = 0;
+    if let Some(captured_piece) = board.squares[to_row][to_col] {
+        score += get_piece_value(&captured_piece);
+    }
+    if (2..=5).contains(&to_row) && (2..=5).contains(&to_col) {
+        score += 10;
+    }
+    score
+}
+
+fn alpha_beta(
+    board: &Board,
+    depth: u32,
+    mut alpha: i32,
+    mut beta: i32,
+    maximizing_player: bool,
+    color: Color,
+) -> i32 {
+    if depth == 0 {
+        return evaluate_position(board);
+    }
+
+    let mut moves = board.generate_all_moves(color);
+    moves.sort_by_key(|m| -score_move(board, m));
+
+    if maximizing_player {
+        let mut max_eval = i32::MIN;
+        for m in moves {
+            let mut new_board = board.clone();
+            new_board.apply_move(m);
+
+            if let Some(king_pos) = new_board.find_king(color) {
+                if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+
+            let eval = alpha_beta(
+                &new_board,
+                depth - 1,
+                alpha,
+                beta,
+                false,
+                opposite_color(color),
+            );
+            max_eval = max_eval.max(eval);
+            alpha = alpha.max(eval);
+            if beta <= alpha {
+                break;
+            }
+        }
+        max_eval
+    } else {
+        let mut min_eval = i32::MAX;
+        for m in moves {
+            let mut new_board = board.clone();
+            new_board.apply_move(m);
+
+            if let Some(king_pos) = new_board.find_king(color) {
+                if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+
+            let eval = alpha_beta(
+                &new_board,
+                depth - 1,
+                alpha,
+                beta,
+                true,
+                opposite_color(color),
+            );
+            min_eval = min_eval.min(eval);
+            beta = beta.min(eval);
+            if beta <= alpha {
+                break;
+            }
+        }
+        min_eval
+    }
+}
 
 pub fn improved_best_move_for_color(
     board: &Board,
     color: Color,
     depth: u32,
 ) -> Option<((usize, usize), (usize, usize))> {
-    fn get_piece_value(piece: &Piece) -> i32 {
-        match piece.kind {
-            PieceType::Pawn => 100,
-            PieceType::Knight => 320,
-            PieceType::Bishop => 330,
-            PieceType::Rook => 500,
-            PieceType::Queen => 900,
-            PieceType::King => 20000,
-        }
-    }
-
-    fn evaluate_position(board: &Board) -> i32 {
-        let mut score = 0;
-        for row in 0..8 {
-            for col in 0..8 {
-                if let Some(piece) = board.squares[row][col] {
-                    let mut piece_score = get_piece_value(&piece);
-                    if (2..=5).contains(&row) && (2..=5).contains(&col) {
-                        piece_score += 10;
-                    }
-                    score += if piece.color == Color::White {
-                        piece_score
-                    } else {
-                        -piece_score
-                    };
-                }
-            }
-        }
-        score
-    }
-
-    fn score_move(board: &Board, m: &((usize, usize), (usize, usize))) -> i32 {
-        let ((_, _), (to_row, to_col)) = *m;
-        let mut score = 0;
-        if let Some(captured_piece) = board.squares[to_row][to_col] {
-            score += get_piece_value(&captured_piece);
-        }
-        if (2..=5).contains(&to_row) && (2..=5).contains(&to_col) {
-            score += 10;
-        }
-        score
-    }
-
-    fn alpha_beta(
-        board: &Board,
-        depth: u32,
-        mut alpha: i32,
-        mut beta: i32,
-        maximizing_player: bool,
-        color: Color,
-    ) -> i32 {
-        if depth == 0 {
-            return evaluate_position(board);
-        }
-
-        let mut moves = board.generate_all_moves(color);
-        moves.sort_by_key(|m| -score_move(board, m));
-
-        if maximizing_player {
-            let mut max_eval = i32::MIN;
-            for m in moves {
-                let mut new_board = board.clone();
-                new_board.apply_move(m);
-
-                if let Some(king_pos) = new_board.find_king(color) {
-                    if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-
-                let eval = alpha_beta(
-                    &new_board,
-                    depth - 1,
-                    alpha,
-                    beta,
-                    false,
-                    opposite_color(color),
-                );
-                max_eval = max_eval.max(eval);
-                alpha = alpha.max(eval);
-                if beta <= alpha {
-                    break;
-                }
-            }
-            max_eval
-        } else {
-            let mut min_eval = i32::MAX;
-            for m in moves {
-                let mut new_board = board.clone();
-                new_board.apply_move(m);
-
-                if let Some(king_pos) = new_board.find_king(color) {
-                    if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-
-                let eval = alpha_beta(
-                    &new_board,
-                    depth - 1,
-                    alpha,
-                    beta,
-                    true,
-                    opposite_color(color),
-                );
-                min_eval = min_eval.min(eval);
-                beta = beta.min(eval);
-                if beta <= alpha {
-                    break;
-                }
-            }
-            min_eval
-        }
-    }
-
     // Main search logic with thread pool (Rayon example)
     let best_move = Arc::new(Mutex::new(None));
     let best_value = Arc::new(Mutex::new(if color == Color::White {
@@ -844,38 +844,41 @@ pub fn improved_best_move_for_color(
     moves.sort_by_key(|m| -score_move(board, m));
 
     // Using Rayon for parallel iteration over moves
-    let _handles: Vec<_> = moves.into_par_iter().map(|m| {
-        let best_move = Arc::clone(&best_move);
-        let best_value = Arc::clone(&best_value);
-        let mut new_board = board.clone();
-        new_board.apply_move(m);
+    let _handles: Vec<_> = moves
+        .into_par_iter()
+        .map(|m| {
+            let best_move = Arc::clone(&best_move);
+            let best_value = Arc::clone(&best_value);
+            let mut new_board = board.clone();
+            new_board.apply_move(m);
 
-        if let Some(king_pos) = new_board.find_king(color) {
-            if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
+            if let Some(king_pos) = new_board.find_king(color) {
+                if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
+                    return (); // Skip invalid move
+                }
+            } else {
                 return (); // Skip invalid move
             }
-         } else {
-                return (); // Skip invalid move
-        }
 
-        let eval = alpha_beta(
-            &new_board,
-            depth - 1,
-            i32::MIN + 1,
-            i32::MAX - 1,
-            color == Color::Black,
-            opposite_color(color),
-        );
+            let eval = alpha_beta(
+                &new_board,
+                depth - 1,
+                i32::MIN + 1,
+                i32::MAX - 1,
+                color == Color::Black,
+                opposite_color(color),
+            );
 
-        let mut best_value = best_value.lock().unwrap();
-        let mut best_move = best_move.lock().unwrap();
-        if (color == Color::White && eval > *best_value)
-            || (color == Color::Black && eval < *best_value)
-        {
-            *best_value = eval;
-            *best_move = Some(m);
-        }
-    }).collect();
+            let mut best_value = best_value.lock().unwrap();
+            let mut best_move = best_move.lock().unwrap();
+            if (color == Color::White && eval > *best_value)
+                || (color == Color::Black && eval < *best_value)
+            {
+                *best_value = eval;
+                *best_move = Some(m);
+            }
+        })
+        .collect();
 
     // Wait for all threads to finish (Rayon handles this internally)
     Arc::try_unwrap(best_move).unwrap().into_inner().unwrap()
