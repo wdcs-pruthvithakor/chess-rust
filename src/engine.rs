@@ -705,6 +705,8 @@ pub fn opposite_color(color: Color) -> Color {
     }
 }
 use std::thread;
+use std::sync::{Arc, Mutex};
+use std::cmp::Ordering;
 
 pub fn improved_best_move_for_color(
     board: &Board,
@@ -767,6 +769,7 @@ pub fn improved_best_move_for_color(
         }
 
         let mut moves = board.generate_all_moves(color);
+        // Sort moves to improve pruning
         moves.sort_by_key(|m| -score_move(board, m));
 
         if maximizing_player {
@@ -777,7 +780,7 @@ pub fn improved_best_move_for_color(
 
                 if let Some(king_pos) = new_board.find_king(color) {
                     if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                        continue; // Skip this move
+                        continue;
                     }
                 } else {
                     continue;
@@ -830,68 +833,55 @@ pub fn improved_best_move_for_color(
         }
     }
 
-    // Main search logic with threading
-    let mut best_move = None;
-    let mut best_value = if color == Color::White {
+    // Main search logic with thread pool
+    let best_move = Arc::new(Mutex::new(None));
+    let best_value = Arc::new(Mutex::new(if color == Color::White {
         i32::MIN
     } else {
         i32::MAX
-    };
-    let mut moves = board.generate_all_moves(color);
+    }));
 
+    let mut moves = board.generate_all_moves(color);
     // Sort moves to improve pruning
     moves.sort_by_key(|m| -score_move(board, m));
 
-    let mut handles = vec![];
-
-    // Launch threads only for legal moves
-    for m in moves {
+    let handles: Vec<_> = moves.into_iter().map(|m| {
+        let best_move = Arc::clone(&best_move);
+        let best_value = Arc::clone(&best_value);
         let mut new_board = board.clone();
         new_board.apply_move(m);
 
-        // Check if move leaves the king in check **before** spawning a thread
         if let Some(king_pos) = new_board.find_king(color) {
             if new_board.is_square_under_attack(king_pos.0, king_pos.1, color) {
-                continue; // Skip this move
+                return thread::spawn(move || ());
             }
         } else {
-            continue; // Skip this move
+            return thread::spawn(move || ());
         }
 
-        let board_clone = new_board.clone();
-        let color_clone = color;
-        let depth_clone = depth;
-
-        let handle = thread::spawn(move || {
-            alpha_beta(
-                &board_clone,
-                depth_clone - 1,
+        thread::spawn(move || {
+            let eval = alpha_beta(
+                &new_board,
+                depth - 1,
                 i32::MIN + 1,
                 i32::MAX - 1,
-                color_clone == Color::Black,
-                opposite_color(color_clone),
-            )
-        });
+                color == Color::Black,
+                opposite_color(color),
+            );
+            let mut best_value = best_value.lock().unwrap();
+            let mut best_move = best_move.lock().unwrap();
+            if (color == Color::White && eval > *best_value)
+                || (color == Color::Black && eval < *best_value)
+            {
+                *best_value = eval;
+                *best_move = Some(m);
+            }
+        })
+    }).collect();
 
-        handles.push((handle, m));
+    for handle in handles {
+        handle.join().unwrap();
     }
 
-    // Collect results and determine the best move
-    for (handle, m) in handles {
-        let value = handle.join().unwrap();
-
-        if color == Color::White {
-            if value > best_value {
-                best_value = value;
-                best_move = Some(m);
-            }
-        } else {
-            if value < best_value {
-                best_value = value;
-                best_move = Some(m);
-            }
-        }
-    }
-
-    best_move
+    Arc::try_unwrap(best_move).unwrap().into_inner().unwrap()
 }
