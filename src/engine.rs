@@ -711,6 +711,19 @@ use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+#[derive(Clone)]
+struct TranspositionEntry {
+    value: i32,
+    depth: u32,
+    move_type: MoveType,
+}
+
+#[derive(Copy, Clone)]
+enum MoveType {
+    Exact,
+    LowerBound,
+    UpperBound,
+}
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct PositionKey(u64); // 64-bit key for the board
@@ -762,7 +775,7 @@ impl ZobristHasher {
 }
 
 pub struct TranspositionTable {
-    table: HashMap<PositionKey, i32>,
+    table: HashMap<PositionKey, TranspositionEntry>,
 }
 
 impl TranspositionTable {
@@ -772,13 +785,31 @@ impl TranspositionTable {
         }
     }
 
-    pub fn get(&self, key: &PositionKey) -> Option<&i32> {
+    pub fn get(&self, key: &PositionKey) -> Option<&TranspositionEntry> {
         self.table.get(key)
     }
 
-    pub fn insert(&mut self, key: PositionKey, value: i32) {
-        self.table.insert(key, value);
+    pub fn insert(&mut self, key: PositionKey, value: i32, depth: u32, move_type: MoveType) {
+        self.table.insert(key, TranspositionEntry { value, depth, move_type });
     }
+}
+
+// Add game phase calculation
+fn calculate_game_phase(board: &Board) -> f32 {
+    let mut piece_count = 0;
+    let initial_pieces = 16; // 8 pawns + 8 pieces per side
+    
+    for row in 0..8 {
+        for col in 0..8 {
+            if let Some(piece) = &board.squares[row][col] {
+                if piece.kind != PieceType::King {
+                    piece_count += 1;
+                }
+            }
+        }
+    }
+    
+    (piece_count as f32) / (initial_pieces as f32 * 2.0)
 }
 
 pub fn improved_best_move_for_color(
@@ -838,7 +869,8 @@ pub fn improved_best_move_for_color(
         let mut black_pawns_per_file = [0; 8];
         let mut white_bishops = 0;
         let mut black_bishops = 0;
-    
+        let game_phase = calculate_game_phase(board);
+        let mut development_score = 0;
         // First pass: collect piece statistics
         for row in 0..8 {
             for col in 0..8 {
@@ -864,11 +896,38 @@ pub fn improved_best_move_for_color(
             }
         }
     
-        // Second pass: evaluate pieces and positions
+        // Second pass with updated piece evaluation
         for row in 0..8 {
             for col in 0..8 {
                 if let Some(piece) = &board.squares[row][col] {
                     let mut piece_score = get_piece_value(piece);
+                    
+                    // Early game penalties and development scoring
+                    if game_phase > 0.8 { // Early game detection
+                        match piece.kind {
+                            PieceType::Queen => {
+                                // Heavy penalty for early queen moves
+                                if (piece.color == Color::White && row != 7) ||
+                                (piece.color == Color::Black && row != 0) {
+                                    piece_score -= 150; // Significant penalty for early queen development
+                                }
+                            }
+                            PieceType::Knight | PieceType::Bishop => {
+                                // Development bonus for minor pieces
+                                if (piece.color == Color::White && row != 7) ||
+                                (piece.color == Color::Black && row != 0) {
+                                    development_score += 30;
+                                }
+                            }
+                            PieceType::Pawn => {
+                                // Center pawn development bonus
+                                if (3..=4).contains(&row) && (2..=5).contains(&col) {
+                                    development_score += 20;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                     
                     // Apply piece-square table bonuses
                     let position_bonus = match piece.kind {
@@ -943,15 +1002,22 @@ pub fn improved_best_move_for_color(
                         }
                     }
     
-                    // Mobility bonus (simplified)
+                    // Adjusted mobility scoring
                     let moves = board.generate_moves_for_piece(row, col);
-                    piece_score += (moves.len() as i32) * 2;
-    
-                    score += if piece.color == Color::White {
-                        piece_score
-                    } else {
-                        -piece_score
+                    let mobility_bonus = match piece.kind {
+                        PieceType::Queen => {
+                            if game_phase > 0.8 {
+                                moves.len() as i32 / 4 // Reduced queen mobility bonus in early game
+                            } else {
+                                moves.len() as i32 * 2
+                            }
+                        }
+                        PieceType::Knight | PieceType::Bishop => moves.len() as i32 * 2,
+                        PieceType::Rook => moves.len() as i32 * 2,
+                        _ => moves.len() as i32,
                     };
+                    
+                    piece_score += mobility_bonus;
                 }
             }
         }
@@ -964,7 +1030,7 @@ pub fn improved_best_move_for_color(
             score -= evaluate_king_safety(board, Color::Black, black_king_row, black_king_col);
         }
     
-        score
+        score + development_score
     }
     
     fn evaluate_king_safety(board: &Board, color: Color, king_row: usize, king_col: usize) -> i32 {
@@ -1032,6 +1098,7 @@ pub fn improved_best_move_for_color(
 
     let transposition_table = Arc::new(Mutex::new(TranspositionTable::new()));
     let zobrist_hasher = ZobristHasher::new();
+
     fn alpha_beta(
         board: &Board,
         depth: u32,
@@ -1044,10 +1111,21 @@ pub fn improved_best_move_for_color(
     ) -> i32 {
         // Compute the Zobrist hash for the current board state
         let key = zobrist_hasher.compute_board_hash(board);
-    
+        let original_alpha = alpha;
+
         // Check if the position has already been evaluated
-        if let Some(value) = transposition_table.lock().unwrap().get(&key) {
-            return *value; // Return the stored evaluation
+        // Enhanced transposition table lookup
+        if let Some(entry) = transposition_table.lock().unwrap().get(&key) {
+            if entry.depth >= depth {
+                match entry.move_type {
+                    MoveType::Exact => return entry.value,
+                    MoveType::LowerBound => alpha = alpha.max(entry.value),
+                    MoveType::UpperBound => beta = beta.min(entry.value),
+                }
+                if alpha >= beta {
+                    return entry.value;
+                }
+            }
         }
     
         if depth == 0 {
@@ -1096,8 +1174,15 @@ pub fn improved_best_move_for_color(
                 break;
             }
         }
+        let move_type = if best_eval <= original_alpha {
+            MoveType::UpperBound
+        } else if best_eval >= beta {
+            MoveType::LowerBound
+        } else {
+            MoveType::Exact
+        };
     
-        transposition_table.lock().unwrap().insert(key, best_eval); // Store the result in the table
+        transposition_table.lock().unwrap().insert(key, best_eval, depth, move_type); // Store the result in the table
         best_eval
     }
 
