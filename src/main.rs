@@ -35,6 +35,7 @@ struct ChessApp {
     board: Board,
     // The currently selected square by the human player, if any.
     selected: Option<(usize, usize)>,
+    selected_moves: Option<Vec<(usize, usize)>>,
     // Whose turn it is. We assume the human plays White.
     current_turn: Color,
     // Difficulty (minimax depth) for the bot.
@@ -59,8 +60,10 @@ impl ChessApp {
 
                     // Highlight selected square
                     let highlight_color = if let Some((sel_row, sel_col)) = self.selected {
-                        if r == sel_row && c == sel_col {
-                            "#FFDD00" // A bright yellow for the selected square
+                        if self.selected_moves.as_ref().map(|moves| moves.contains(&(r, c))).unwrap_or(false) {
+                            "#ADD8E6" // Light blue for valid moves of the selected piece
+                        } else if r == sel_row && c == sel_col {
+                            "#90EE90" // Light green for the selected square
                         } else {
                             square_color // Default square color
                         }
@@ -120,6 +123,7 @@ impl Default for ChessApp {
         ChessApp {
             board: Board::new(),
             selected: None,
+            selected_moves: None,
             current_turn: Color::White,
             difficulty: 3, // Adjust for desired bot strength.
             slider_value: 3.0,
@@ -194,6 +198,7 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message> {
                     } else {
                         // Clear selection on an invalid move.
                         app.selected = None;
+                        app.selected_moves = None;
                         println!("invalid move");
                     }
                 } else {
@@ -202,6 +207,7 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message> {
                     if let Some(piece) = app.board.squares[row][col] {
                         if piece.color == Color::White {
                             app.selected = Some((row, col));
+                            app.selected_moves = Some(app.board.generate_moves_for_piece(row, col).into_iter().filter(|(from,to)| app.board.is_valid_move(*from,*to)).map(|(_,(d_row, d_col))| (d_row, d_col)).collect()); 
                         }
                     }
                 }
