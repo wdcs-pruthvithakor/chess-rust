@@ -684,7 +684,7 @@ impl Board {
 
         // Check if the move is in the piece’s legal moves
         let legal_moves = self.generate_moves_for_piece(from.0, from.1);
-        println!("Legal moves: {:?}", legal_moves);
+        // println!("Legal moves: {:?}", legal_moves);
         if !legal_moves.contains(&(from, to)) {
             return false;
         }
@@ -693,7 +693,7 @@ impl Board {
         let mut simulated_board = self.clone();
         simulated_board.apply_move((from, to));
         if simulated_board.is_in_check(piece.color) {
-            println!("{:?}", simulated_board);
+            println!("In check: {:?}", simulated_board);
             return false; // Move is invalid if it leaves the king in check
         }
 
@@ -880,6 +880,9 @@ pub fn improved_best_move_for_color(
         })
         .collect();
 
-    // Wait for all threads to finish (Rayon handles this internally)
-    Arc::try_unwrap(best_move).unwrap().into_inner().unwrap()
+
+    match Arc::try_unwrap(best_move) {
+        Ok(best_move) => best_move.into_inner().unwrap_or(None),
+        Err(_) => None
+    }
 }
