@@ -437,70 +437,62 @@ impl Board {
         let (from_row, from_col) = from;
         let (to_row, to_col) = to;
 
-        // Ensure it's a king moving two squares
-        if (from_col == 4) && (to_col == 6 || to_col == 2) && (from_row == to_row) {
-            let color = if from_row == 0 {
-                Color::White
-            } else {
-                Color::Black
-            };
-            let kingside = to_col == 6;
-            let rook_col = if kingside { 7 } else { 0 };
-
-            // Castling flag check
-            if color == Color::White && !self.white_castle_possible {
-                return false;
-            }
-            if color == Color::Black && !self.black_castle_possible {
-                return false;
-            }
-
-            // Ensure King and Rook are in their original positions
-            if let Some(Piece {
-                kind: PieceType::King,
-                color: king_color,
-            }) = self.squares[from_row][from_col]
-            {
-                if king_color != color {
-                    return false;
-                }
-            } else {
-                return false; // King must be present
-            }
-
-            if let Some(Piece {
-                kind: PieceType::Rook,
-                color: rook_color,
-            }) = self.squares[from_row][rook_col]
-            {
-                if rook_color != color {
-                    return false;
-                }
-            } else {
-                return false; // Rook must be present
-            }
-
-            // Ensure the squares between the King and Rook are empty
-            let range = if kingside { 5..7 } else { 1..4 };
-            if range.clone().any(|c| self.squares[from_row][c].is_some()) {
-                return false; // Path must be clear
-            }
-
-            // Ensure the King is not in check, moving through check, or landing in check
-            if self.is_in_check(color) {
-                return false;
-            }
-            for col in range {
-                if self.is_square_under_attack(from_row, col, color) {
-                    return false;
-                }
-            }
-
-            // Passed all checks, castling is valid
-            return true;
+        // Basic checks: King's original position, moving two squares horizontally
+        if from_col != 4 || (to_col != 6 && to_col != 2) || from_row != to_row {
+            return false;
         }
 
-        false // Not a valid castling move
+        let color = if from_row == 0 { Color::White } else { Color::Black };
+        let kingside = to_col == 6;
+        let rook_col = if kingside { 7 } else { 0 };
+
+        // Castling rights check
+        let can_castle = if color == Color::White {
+            self.white_castle_possible
+        } else {
+            self.black_castle_possible
+        };
+        if !can_castle {
+            return false;
+        }
+
+        // King and Rook must be present and in their starting positions
+        if let Some(piece) = self.squares[from_row][from_col] {
+            if piece.kind != PieceType::King || piece.color != color {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        if let Some(piece) = self.squares[from_row][rook_col] {
+            if piece.kind != PieceType::Rook || piece.color != color {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Squares between King and Rook must be empty
+        let range = if kingside { 5..7 } else { 1..4 };
+        if range.clone().any(|c| self.squares[from_row][c].is_some()) {
+            return false;
+        }
+
+
+        // King cannot be in check, pass through check, or end in check
+        if self.is_in_check(color) {
+            return false;
+        }
+
+        let king_path = if kingside { 4..=6 } else { 4..=2 };
+        for col in king_path {
+            if self.is_square_under_attack(from_row, col, color) {
+                return false;
+            }
+        }
+
+        true // All checks passed
     }
 
     // Execute the castling move if valid
