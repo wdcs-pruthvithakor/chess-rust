@@ -43,8 +43,8 @@ pub const EMPTY: Option<Piece> = None;
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
     pub half_move_clock: u32, // Tracks moves since last pawn move or capture
-    pub white_castle_possible: bool,
-    pub black_castle_possible: bool,
+    pub white_castle_possible: (bool,bool),
+    pub black_castle_possible: (bool,bool),
     pub en_passant_target: Option<(usize, usize)>,
 }
 
@@ -53,8 +53,8 @@ impl Board {
         let mut board = Board {
             squares: [[EMPTY; 8]; 8],
             half_move_clock: 0,
-            white_castle_possible: true,
-            black_castle_possible: true,
+            white_castle_possible: (true,true),
+            black_castle_possible: (true,true),
             en_passant_target: None,
         };
 
@@ -272,22 +272,22 @@ impl Board {
                     }
                     // Castling logic
                     if let Some(piece) = self.squares[row][col] {
-                        if piece.color == Color::White && self.white_castle_possible {
-                            if self.can_castle((row, col), (row, 6)) {
+                        if piece.color == Color::White {
+                            if self.can_castle_unsafe((row, col), (row, 6)) {
                                 // Kingside castling
                                 moves.push(((row, col), (row, 6)));
                             }
-                            if self.can_castle((row, col), (row, 2)) {
+                            if self.can_castle_unsafe((row, col), (row, 2)) {
                                 // Queenside castling
                                 moves.push(((row, col), (row, 2)));
                             }
                         }
-                        if piece.color == Color::Black && self.black_castle_possible {
-                            if self.can_castle((row, col), (row, 6)) {
+                        if piece.color == Color::Black {
+                            if self.can_castle_unsafe((row, col), (row, 6)) {
                                 // Kingside castling
                                 moves.push(((row, col), (row, 6)));
                             }
-                            if self.can_castle((row, col), (row, 2)) {
+                            if self.can_castle_unsafe((row, col), (row, 2)) {
                                 // Queenside castling
                                 moves.push(((row, col), (row, 2)));
                             }
@@ -391,6 +391,19 @@ impl Board {
                 // Promote to a Queen (can be extended for other choices)
                 piece.kind = PieceType::Queen;
             }
+            if piece.kind == PieceType::Rook {
+                if piece.color == Color::White {
+                    if from_col == 0 { self.white_castle_possible.0 = false; } else { self.white_castle_possible.1 = false; }
+                } else { 
+                    if from_col == 0 { self.black_castle_possible.0 = false; } else { self.black_castle_possible.1 = false; }
+                }
+            } else if piece.kind == PieceType::King {
+                if piece.color == Color::White {
+                    self.white_castle_possible = (false, false);
+                } else { 
+                    self.black_castle_possible = (false, false);
+                }
+            }
             self.squares[to_row][to_col] = Some(piece);
             // Update en passant target square
             self.en_passant_target = None; // Reset on every move
@@ -431,9 +444,33 @@ impl Board {
 
         false
     }
-
-    // Check if the given move (from -> to) is a valid castling move
     pub fn can_castle(&self, from: (usize, usize), to: (usize, usize)) -> bool {
+        let (from_row, from_col) = from;
+        let (to_row, to_col) = to;
+
+        // Basic checks: King's original position, moving two squares horizontally
+        if from_col != 4 || (to_col != 6 && to_col != 2) || from_row != to_row {
+            return false;
+        }
+        
+        let color = if from_row == 0 { Color::White } else { Color::Black };
+        let kingside = to_col == 6;
+        let rook_col = if kingside { 7 } else { 0 };
+        let king_path = if kingside { 4..=6 } else { 4..=2 };
+        if !self.can_castle_unsafe(from, to) { return false; }
+        // King cannot be in check, pass through check, or end in check
+        if self.is_in_check(color) {
+            return false;
+        }
+        for col in king_path {
+            if self.is_square_under_attack(from_row, col, color) {
+                return false;
+            }
+        }
+        true
+    }
+    // Check if the given move (from -> to) is a valid castling move
+    pub fn can_castle_unsafe(&self, from: (usize, usize), to: (usize, usize)) -> bool {
         let (from_row, from_col) = from;
         let (to_row, to_col) = to;
 
@@ -448,9 +485,9 @@ impl Board {
 
         // Castling rights check
         let can_castle = if color == Color::White {
-            self.white_castle_possible
+            if kingside {self.white_castle_possible.1} else {self.white_castle_possible.0}
         } else {
-            self.black_castle_possible
+            if kingside {self.black_castle_possible.1} else {self.black_castle_possible.0}
         };
         if !can_castle {
             return false;
@@ -480,17 +517,6 @@ impl Board {
         }
 
 
-        // King cannot be in check, pass through check, or end in check
-        if self.is_in_check(color) {
-            return false;
-        }
-
-        let king_path = if kingside { 4..=6 } else { 4..=2 };
-        for col in king_path {
-            if self.is_square_under_attack(from_row, col, color) {
-                return false;
-            }
-        }
 
         true // All checks passed
     }
@@ -515,9 +541,9 @@ impl Board {
 
         // Disable further castling for this player
         if row == 0 {
-            self.white_castle_possible = false;
+            self.white_castle_possible = (false, false);
         } else {
-            self.black_castle_possible = false;
+            self.black_castle_possible = (false, false);
         }
 
         true
