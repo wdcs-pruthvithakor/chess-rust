@@ -235,29 +235,7 @@ impl Board {
                             }
                         }
                     }
-                    // Castling logic
-                    if let Some(piece) = self.squares[row][col] {
-                        if piece.color == Color::White && self.white_castle_possible {
-                            if self.can_castle((row, col), (row, 6)) {
-                                // Kingside castling
-                                moves.push(((row, col), (row, 6)));
-                            }
-                            if self.can_castle((row, col), (row, 2)) {
-                                // Queenside castling
-                                moves.push(((row, col), (row, 2)));
-                            }
-                        }
-                        if piece.color == Color::Black && self.black_castle_possible {
-                            if self.can_castle((row, col), (row, 6)) {
-                                // Kingside castling
-                                moves.push(((row, col), (row, 6)));
-                            }
-                            if self.can_castle((row, col), (row, 2)) {
-                                // Queenside castling
-                                moves.push(((row, col), (row, 2)));
-                            }
-                        }
-                    }
+
                 }
                 PieceType::King => {
                     let king_moves = [
@@ -289,6 +267,29 @@ impl Board {
                                 // if !self.is_square_under_attack(new_row as usize, new_col as usize, piece.color) {
                                 moves.push(((row, col), (new_row as usize, new_col as usize)));
                                 // }
+                            }
+                        }
+                    }
+                    // Castling logic
+                    if let Some(piece) = self.squares[row][col] {
+                        if piece.color == Color::White && self.white_castle_possible {
+                            if self.can_castle((row, col), (row, 6)) {
+                                // Kingside castling
+                                moves.push(((row, col), (row, 6)));
+                            }
+                            if self.can_castle((row, col), (row, 2)) {
+                                // Queenside castling
+                                moves.push(((row, col), (row, 2)));
+                            }
+                        }
+                        if piece.color == Color::Black && self.black_castle_possible {
+                            if self.can_castle((row, col), (row, 6)) {
+                                // Kingside castling
+                                moves.push(((row, col), (row, 6)));
+                            }
+                            if self.can_castle((row, col), (row, 2)) {
+                                // Queenside castling
+                                moves.push(((row, col), (row, 2)));
                             }
                         }
                     }
