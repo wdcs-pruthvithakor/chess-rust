@@ -51,71 +51,76 @@ impl ChessApp {
     fn board_view(&self) -> Column<'_, Message> {
         let mut board_view = Column::new().spacing(0);
 
-            for r in (0..8).rev() {
-                // Iterate rows from 7 to 0 to make white pieces on the bottom
-                let mut row_view = Row::new().spacing(0);
-                for c in 0..8 {
-                    let is_light = (r + c) % 2 == 0;
-                    let square_color = if is_light { "#F0D9B5" } else { "#B58863" };
+        for r in (0..8).rev() {
+            // Iterate rows from 7 to 0 to make white pieces on the bottom
+            let mut row_view = Row::new().spacing(0);
+            for c in 0..8 {
+                let is_light = (r + c) % 2 == 0;
+                let square_color = if is_light { "#F0D9B5" } else { "#B58863" };
 
-                    // Highlight selected square
-                    let highlight_color = if let Some((sel_row, sel_col)) = self.selected {
-                        if self.selected_moves.as_ref().map(|moves| moves.contains(&(r, c))).unwrap_or(false) {
-                            "#ADD8E6" // Light blue for valid moves of the selected piece
-                        } else if r == sel_row && c == sel_col {
-                            "#90EE90" // Light green for the selected square
-                        } else {
-                            square_color // Default square color
-                        }
+                // Highlight selected square
+                let highlight_color = if let Some((sel_row, sel_col)) = self.selected {
+                    if self
+                        .selected_moves
+                        .as_ref()
+                        .map(|moves| moves.contains(&(r, c)))
+                        .unwrap_or(false)
+                    {
+                        "#ADD8E6" // Light blue for valid moves of the selected piece
+                    } else if r == sel_row && c == sel_col {
+                        "#90EE90" // Light green for the selected square
                     } else {
-                        square_color // Default square color if nothing is selected
-                    };
+                        square_color // Default square color
+                    }
+                } else {
+                    square_color // Default square color if nothing is selected
+                };
 
-                    let square_content: Element<'static, Message> = self.board.squares[r][c]
-                        .and_then(|piece| {
-                            let asset: &str = match (piece.color, piece.kind) {
-                                (Color::White, PieceType::Pawn) => "assets/white_pawn.jpeg",
-                                (Color::Black, PieceType::Pawn) => "assets/black_pawn.png",
-                                (Color::White, PieceType::King) => "assets/white_king.jpeg",
-                                (Color::Black, PieceType::King) => "assets/black_king.png",
-                                (Color::White, PieceType::Queen) => "assets/white_queen.jpeg",
-                                (Color::Black, PieceType::Queen) => "assets/black_queen.jpeg",
-                                (Color::White, PieceType::Rook) => "assets/white_rook.png",
-                                (Color::Black, PieceType::Rook) => "assets/black_rook.png",
-                                (Color::White, PieceType::Knight) => "assets/white_knight.jpeg",
-                                (Color::Black, PieceType::Knight) => "assets/black_knight.jpeg",
-                                (Color::White, PieceType::Bishop) => "assets/white_bishop.jpeg",
-                                (Color::Black, PieceType::Bishop) => "assets/black_bishop.png",
-                            };
-                            let handle = image::Handle::from_path(asset); // Create the handle
-                            Some(Image::new(handle).into())
-                        })
-                        .unwrap_or_else(|| {
-                            // Handle the None case directly
-                            Container::new(Text::new(""))
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .center_x(Length::Fill)
-                                .center_y(Length::Fill)
-                                .into()
-                        });
+                let square_content: Element<'static, Message> = self.board.squares[r][c]
+                    .and_then(|piece| {
+                        let asset: &str = match (piece.color, piece.kind) {
+                            (Color::White, PieceType::Pawn) => "assets/white_pawn.jpeg",
+                            (Color::Black, PieceType::Pawn) => "assets/black_pawn.png",
+                            (Color::White, PieceType::King) => "assets/white_king.jpeg",
+                            (Color::Black, PieceType::King) => "assets/black_king.png",
+                            (Color::White, PieceType::Queen) => "assets/white_queen.jpeg",
+                            (Color::Black, PieceType::Queen) => "assets/black_queen.jpeg",
+                            (Color::White, PieceType::Rook) => "assets/white_rook.png",
+                            (Color::Black, PieceType::Rook) => "assets/black_rook.png",
+                            (Color::White, PieceType::Knight) => "assets/white_knight.jpeg",
+                            (Color::Black, PieceType::Knight) => "assets/black_knight.jpeg",
+                            (Color::White, PieceType::Bishop) => "assets/white_bishop.jpeg",
+                            (Color::Black, PieceType::Bishop) => "assets/black_bishop.png",
+                        };
+                        let handle = image::Handle::from_path(asset); // Create the handle
+                        Some(Image::new(handle).into())
+                    })
+                    .unwrap_or_else(|| {
+                        // Handle the None case directly
+                        Container::new(Text::new(""))
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill)
+                            .into()
+                    });
 
-                    let square = Button::new(square_content) // Use Button directly with container
-                        .style(|_theme: &Theme, _style| {
-                            BoardSquareStyle {
-                                color: highlight_color,
-                            }
-                            .style()
-                        }) // Style the Button
-                        .on_press(Message::SquareClicked(r, c))
-                        .width(Length::FillPortion(1))
-                        .height(Length::FillPortion(1));
+                let square = Button::new(square_content) // Use Button directly with container
+                    .style(|_theme: &Theme, _style| {
+                        BoardSquareStyle {
+                            color: highlight_color,
+                        }
+                        .style()
+                    }) // Style the Button
+                    .on_press(Message::SquareClicked(r, c))
+                    .width(Length::FillPortion(1))
+                    .height(Length::FillPortion(1));
 
-                    row_view = row_view.push(square); // Reassign row_view
-                }
-                board_view = board_view.push(row_view); // Reassign board_view
+                row_view = row_view.push(square); // Reassign row_view
             }
-            board_view
+            board_view = board_view.push(row_view); // Reassign board_view
+        }
+        board_view
     }
 }
 impl Default for ChessApp {
@@ -207,7 +212,14 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message> {
                     if let Some(piece) = app.board.squares[row][col] {
                         if piece.color == Color::White {
                             app.selected = Some((row, col));
-                            app.selected_moves = Some(app.board.generate_moves_for_piece(row, col).into_iter().filter(|(from,to)| app.board.is_valid_move(*from,*to)).map(|(_,(d_row, d_col))| (d_row, d_col)).collect()); 
+                            app.selected_moves = Some(
+                                app.board
+                                    .generate_moves_for_piece(row, col)
+                                    .into_iter()
+                                    .filter(|(from, to)| app.board.is_valid_move(*from, *to))
+                                    .map(|(_, (d_row, d_col))| (d_row, d_col))
+                                    .collect(),
+                            );
                         }
                     }
                 }
@@ -266,7 +278,6 @@ fn update(app: &mut ChessApp, message: Message) -> Task<Message> {
     }
     Task::none()
 }
-
 
 /// View function for the application.
 /// It receives an immutable reference to our state and returns an Element.

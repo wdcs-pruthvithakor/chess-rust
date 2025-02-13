@@ -43,8 +43,8 @@ pub const EMPTY: Option<Piece> = None;
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
     pub half_move_clock: u32, // Tracks moves since last pawn move or capture
-    pub white_castle_possible: (bool,bool),
-    pub black_castle_possible: (bool,bool),
+    pub white_castle_possible: (bool, bool),
+    pub black_castle_possible: (bool, bool),
     pub en_passant_target: Option<(usize, usize)>,
 }
 
@@ -53,8 +53,8 @@ impl Board {
         let mut board = Board {
             squares: [[EMPTY; 8]; 8],
             half_move_clock: 0,
-            white_castle_possible: (true,true),
-            black_castle_possible: (true,true),
+            white_castle_possible: (true, true),
+            black_castle_possible: (true, true),
             en_passant_target: None,
         };
 
@@ -235,7 +235,6 @@ impl Board {
                             }
                         }
                     }
-
                 }
                 PieceType::King => {
                     let king_moves = [
@@ -393,14 +392,22 @@ impl Board {
             }
             if piece.kind == PieceType::Rook {
                 if piece.color == Color::White {
-                    if from_col == 0 { self.white_castle_possible.0 = false; } else { self.white_castle_possible.1 = false; }
-                } else { 
-                    if from_col == 0 { self.black_castle_possible.0 = false; } else { self.black_castle_possible.1 = false; }
+                    if from_col == 0 {
+                        self.white_castle_possible.0 = false;
+                    } else {
+                        self.white_castle_possible.1 = false;
+                    }
+                } else {
+                    if from_col == 0 {
+                        self.black_castle_possible.0 = false;
+                    } else {
+                        self.black_castle_possible.1 = false;
+                    }
                 }
             } else if piece.kind == PieceType::King {
                 if piece.color == Color::White {
                     self.white_castle_possible = (false, false);
-                } else { 
+                } else {
                     self.black_castle_possible = (false, false);
                 }
             }
@@ -444,6 +451,37 @@ impl Board {
 
         false
     }
+
+    fn is_castling_move(&self, from: (usize, usize), to: (usize, usize), color: Color) -> bool {
+        let (from_row, from_col) = from;
+        let (to_row, to_col) = to;
+
+        // 1. Basic Castling Conditions:
+        if from_row != to_row {
+            // Must be on the same row
+            return false;
+        }
+
+        if from_col != 4 {
+            // King must start at column 4
+            return false;
+        }
+
+        if to_col != 2 && to_col != 6 {
+            // King must move to column 2 or 6
+            return false;
+        }
+
+        // 2. Color Consistency:
+        if let Some(king) = self.squares[from_row][from_col] {
+            if king.color != color || king.kind != PieceType::King {
+                return false; // Must be the player's King
+            }
+        } else {
+            return false; // King must be present at 'from'
+        }
+        true
+    }
     pub fn can_castle(&self, from: (usize, usize), to: (usize, usize)) -> bool {
         let (from_row, from_col) = from;
         let (to_row, to_col) = to;
@@ -452,12 +490,17 @@ impl Board {
         if from_col != 4 || (to_col != 6 && to_col != 2) || from_row != to_row {
             return false;
         }
-        
-        let color = if from_row == 0 { Color::White } else { Color::Black };
+
+        let color = if from_row == 0 {
+            Color::White
+        } else {
+            Color::Black
+        };
         let kingside = to_col == 6;
-        let rook_col = if kingside { 7 } else { 0 };
         let king_path = if kingside { 4..=6 } else { 4..=2 };
-        if !self.can_castle_unsafe(from, to) { return false; }
+        if !self.can_castle_unsafe(from, to) {
+            return false;
+        }
         // King cannot be in check, pass through check, or end in check
         if self.is_in_check(color) {
             return false;
@@ -479,15 +522,27 @@ impl Board {
             return false;
         }
 
-        let color = if from_row == 0 { Color::White } else { Color::Black };
+        let color = if from_row == 0 {
+            Color::White
+        } else {
+            Color::Black
+        };
         let kingside = to_col == 6;
         let rook_col = if kingside { 7 } else { 0 };
 
         // Castling rights check
         let can_castle = if color == Color::White {
-            if kingside {self.white_castle_possible.1} else {self.white_castle_possible.0}
+            if kingside {
+                self.white_castle_possible.1
+            } else {
+                self.white_castle_possible.0
+            }
         } else {
-            if kingside {self.black_castle_possible.1} else {self.black_castle_possible.0}
+            if kingside {
+                self.black_castle_possible.1
+            } else {
+                self.black_castle_possible.0
+            }
         };
         if !can_castle {
             return false;
@@ -515,8 +570,6 @@ impl Board {
         if range.clone().any(|c| self.squares[from_row][c].is_some()) {
             return false;
         }
-
-
 
         true // All checks passed
     }
@@ -789,6 +842,9 @@ fn alpha_beta(
         let mut max_eval = i32::MIN;
         for m in moves {
             let mut new_board = board.clone();
+            if new_board.is_castling_move(m.0, m.1, color) && !new_board.can_castle(m.0, m.1) {
+                continue;
+            }
             new_board.apply_move(m);
 
             if let Some(king_pos) = new_board.find_king(color) {
@@ -869,6 +925,9 @@ pub fn improved_best_move_for_color(
             let best_move = Arc::clone(&best_move);
             let best_value = Arc::clone(&best_value);
             let mut new_board = board.clone();
+            if new_board.is_castling_move(m.0, m.1, color) && !new_board.can_castle(m.0, m.1) {
+                return ();
+            }
             new_board.apply_move(m);
 
             if let Some(king_pos) = new_board.find_king(color) {
@@ -899,9 +958,8 @@ pub fn improved_best_move_for_color(
         })
         .collect();
 
-
     match Arc::try_unwrap(best_move) {
         Ok(best_move) => best_move.into_inner().unwrap_or(None),
-        Err(_) => None
+        Err(_) => None,
     }
 }
